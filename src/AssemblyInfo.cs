@@ -1,8 +1,8 @@
-﻿using System.Reflection;
+using System.Reflection;
 
 [assembly: AssemblyTitle("Code Tabs")]
 [assembly: AssemblyDescription("Tabbed desktop window manager with a local Codex progress overview")]
 [assembly: AssemblyProduct("Code Tabs")]
-[assembly: AssemblyVersion("0.16.9.0")]
-[assembly: AssemblyFileVersion("0.16.9.0")]
-[assembly: AssemblyInformationalVersion("0.16.9-preview")]
+[assembly: AssemblyVersion("0.16.10.0")]
+[assembly: AssemblyFileVersion("0.16.10.0")]
+[assembly: AssemblyInformationalVersion("0.16.10-preview")]

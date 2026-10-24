@@ -383,7 +383,16 @@ sealed class MainForm : Form
         hosted.Add(h);
         try {
             RestoreBinding(h);
-            if(h.Compatible) { Native.ShowWindowAsync(h.Handle,9); Select(h); return; }
+            if(h.Compatible) {
+                // Shell requires hiding BEFORE changing taskbar eligibility.
+                // Only do this at attach/detach, never during layout or menus.
+                // TOOLWINDOW also removes the duplicate Alt+Tab entry without
+                // introducing an owner/parent and coupling input queues.
+                Native.ShowWindow(h.Handle,0);
+                Native.Style(h.Handle,-20,new IntPtr((h.ExStyle.ToInt64() & ~0x00040000L) | 0x00000080L));
+                Native.SetWindowPos(h.Handle,IntPtr.Zero,0,0,0,0,0x4037);
+                Native.ShowWindowAsync(h.Handle,9); Select(h); return;
+            }
             Native.ShowWindow(h.Handle,9);
             Native.Style(h.Handle,-16,new IntPtr((h.Style.ToInt64() & ~0x80CF0000L) | 0x40000000L));
             Native.Style(h.Handle,-20,new IntPtr(h.ExStyle.ToInt64() & ~0x00040301L));
@@ -485,7 +494,9 @@ sealed class MainForm : Form
         if(h==null||restoringWindows.ContainsKey(h)) return;
         if(Native.IsWindow(h.Handle)) try {
             if(h.Compatible) {
-                Native.SetWindowPos(h.Handle,new IntPtr((h.ExStyle.ToInt64()&8)!=0?-1:-2),0,0,0,0,0x4013);
+                Native.ShowWindow(h.Handle,0);
+                Native.Style(h.Handle,-20,h.ExStyle);
+                Native.SetWindowPos(h.Handle,new IntPtr((h.ExStyle.ToInt64()&8)!=0?-1:-2),0,0,0,0,0x4033);
             } else {
             Native.Parent(h.Handle,h.Parent); Native.Style(h.Handle,-16,h.Style); Native.Style(h.Handle,-20,h.ExStyle);
             Native.SetWindowPos(h.Handle,IntPtr.Zero,0,0,0,0,0x0037);
@@ -940,24 +951,27 @@ sealed class MainForm : Form
                 container.testing=true; container.Show();
                 var other=Screen.AllScreens.FirstOrDefault(s=>s.DeviceName!=display.DeviceName)??display;
                 container.Location=new Point(other.WorkingArea.X+20,other.WorkingArea.Y+20);
+                IntPtr originalExStyle=Native.GetStyle(window,-20);
                 container.Attach(new Hosted { Handle=window,Compatible=true }); Application.DoEvents();
                 container.Close();
                 if(container.IsDisposed) throw new Exception("Container exited before asynchronous restore completed");
                 var watch=Stopwatch.StartNew();
                 while(!container.IsDisposed&&watch.ElapsedMilliseconds<4500) { Application.DoEvents(); System.Threading.Thread.Sleep(10); }
                 if(!container.IsDisposed) throw new Exception("Container did not exit after restoring windows");
+                if(Native.GetStyle(window,-20)!=originalExStyle) throw new Exception("Closing container did not restore shell window styles");
             }
             AssertRestoredPlacement(window,snapshot.Placement,"Close container "+display.DeviceName,snapshot.Bounds);
         }
         Console.Error.WriteLine("Actual FormClosing: waits for verified physical bounds on all monitors");
     }
     void VerifyCompatible(IntPtr window) {
-        IntPtr parent=Native.GetParent(window),style=Native.GetStyle(window,-16),owner=Native.GetStyle(window,-8);
+        IntPtr parent=Native.GetParent(window),style=Native.GetStyle(window,-16),owner=Native.GetStyle(window,-8),exStyle=Native.GetStyle(window,-20);
         // Exercise the production VS Code default, not a manually forced flag.
         bool savedMode=vscodeCompatible; vscodeCompatible=true;
         var h=new Hosted { Handle=window,IsVSCode=true,ApplicationName="Code" };
         Attach(h); Application.DoEvents();
         if(!h.Compatible||Native.GetParent(window)!=parent||Native.GetStyle(window,-16)!=style||Native.GetStyle(window,-8)!=owner) throw new Exception("Compatibility mode modified native parent/style/owner");
+        if((Native.GetStyle(window,-20).ToInt64() & 0x00040080L)!=0x80L) throw new Exception("Hosted window still eligible for taskbar/Alt+Tab");
         VerifyInputIsolation(h);
         VerifyCompatibleMoveAndMenu(h);
         Select(null); if(h.CompatVisible) throw new Exception("Overview did not hide independent window");
@@ -970,6 +984,7 @@ sealed class MainForm : Form
         WindowState=FormWindowState.Minimized; UpdateCompatible(false); if(h.CompatVisible) throw new Exception("Compatibility minimize failed");
         WindowState=FormWindowState.Normal; UpdateCompatible(true); if(!h.CompatVisible) throw new Exception("Compatibility restore failed");
         DetachForTest(h); if(hosted.Contains(h)||!Native.IsWindow(window)) throw new Exception("Compatibility detach failed");
+        if(Native.GetStyle(window,-20)!=exStyle) throw new Exception("Detach did not restore original shell window styles");
         vscodeCompatible=false; Attach(h); Application.DoEvents();
         if(h.Compatible||Native.GetParent(window)!=surface.Handle) throw new Exception("Embedded opt-out failed");
         DetachForTest(h); vscodeCompatible=savedMode;
