@@ -544,18 +544,29 @@ sealed class MainForm : Form
     void UpdateCompatible(bool raise) {
         foreach(var h in hosted) if(h.Compatible && Native.IsWindow(h.Handle)) {
             bool show=!closing && h==strip.Selected && Visible && Enabled && !dialogOpen && WindowState!=FormWindowState.Minimized;
-            if(show!=h.CompatVisible) { Native.ShowWindowAsync(h.Handle,show?4:0); h.CompatVisible=show; raise=raise||show; }
+            bool visible=Native.IsWindowVisible(h.Handle);
+            if(show!=h.CompatVisible||show!=visible) { Native.ShowWindowAsync(h.Handle,show?4:0); h.CompatVisible=show; }
             if(!show) continue;
             Rectangle bounds=surface.RectangleToScreen(surface.ClientRectangle);
-            bool lift=raise&&!menu.Visible;
-            if(bounds!=h.CompatBounds||lift) {
+            Native.RectangleEdges actual; bool positioned=HostApi.GetWindowRect(h.Handle,out actual)&&actual.left==bounds.Left&&actual.top==bounds.Top&&actual.right==bounds.Right&&actual.bottom==bounds.Bottom;
+            bool covered=!WindowAbove(h.Handle,Handle);
+            bool lift=(raise||covered)&&!menu.Visible;
+            if(bounds!=h.CompatBounds||!positioned||lift) {
                 // HWND_NOTOPMOST does not raise an already non-topmost window.
                 // Demote only when needed, then use HWND_TOP to stay above the container.
                 if(lift&&!TopMost&&(Native.GetStyle(h.Handle,-20).ToInt64()&8)!=0) Native.SetWindowPos(h.Handle,new IntPtr(-2),0,0,0,0,0x4013);
-                IntPtr after=lift&&TopMost?new IntPtr(-1):IntPtr.Zero;
-                Native.SetWindowPos(h.Handle,after,bounds.X,bounds.Y,bounds.Width,bounds.Height,lift?0x4010u:0x4014u); h.CompatBounds=bounds;
+                // Passive repairs insert directly above the container, below any
+                // unrelated windows already above it. Never activate or attach queues.
+                IntPtr after=lift?(raise?(TopMost?new IntPtr(-1):IntPtr.Zero):HostApi.GetWindow(Handle,3)):IntPtr.Zero;
+                if(after==h.Handle) after=HostApi.GetWindow(h.Handle,3);
+                Native.SetWindowPos(h.Handle,after,bounds.X,bounds.Y,bounds.Width,bounds.Height,(lift?0x4010u:0x4014u)|0x0040u); h.CompatBounds=bounds;
             }
         }
+    }
+    static bool WindowAbove(IntPtr window,IntPtr reference) {
+        int limit=2048;
+        for(IntPtr w=HostApi.GetWindow(reference,3);w!=IntPtr.Zero&&limit-->0;w=HostApi.GetWindow(w,3)) if(w==window) return true;
+        return false;
     }
     void RestoreBinding(Hosted h) {
         if(!h.IsVSCode) return;
@@ -959,6 +970,21 @@ sealed class MainForm : Form
             }
             if(!above) throw new Exception("Compatible window remained behind container");
             CheckBounds(h);
+            // Simulate a late activation after our asynchronous placement request.
+            Native.SetWindowPos(Handle,IntPtr.Zero,0,0,0,0,0x0013);
+            using(var unrelated=new Form { Text="Unrelated foreground stand-in",Size=new Size(200,120) }) {
+                unrelated.Show(); Native.SetWindowPos(unrelated.Handle,IntPtr.Zero,0,0,0,0,0x0013);
+                watch.Restart();
+                do { UpdateCompatible(false); Application.DoEvents(); System.Threading.Thread.Sleep(10); }
+                while(!WindowAbove(h.Handle,Handle)&&watch.ElapsedMilliseconds<1500);
+                if(!WindowAbove(h.Handle,Handle)) throw new Exception("Late container activation remained blank");
+                if(!WindowAbove(unrelated.Handle,h.Handle)) throw new Exception("Passive repair raised over unrelated window");
+            }
+            Native.ShowWindow(h.Handle,0);
+            watch.Restart();
+            do { UpdateCompatible(false); Application.DoEvents(); System.Threading.Thread.Sleep(10); }
+            while(!Native.IsWindowVisible(h.Handle)&&watch.ElapsedMilliseconds<1500);
+            if(!Native.IsWindowVisible(h.Handle)) throw new Exception("Cached visibility prevented redisplay");
             strip.OpenMenuForTest(h);
             if(!menu.Visible||!h.CompatVisible) throw new Exception("Right-click menu not visible or target hidden");
             UpdateCompatible(true); Application.DoEvents();

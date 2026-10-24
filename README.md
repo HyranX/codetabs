@@ -2,18 +2,18 @@
 
 Windows 桌面窗口标签管理器，附带本地 Codex 会话总览。适合同时打开多个 VS Code 项目时集中切换窗口、查看任务状态。
 
-当前版本：**0.16.7-preview**。Windows 10/11 x64，.NET Framework 4.8。便携运行，无需 Node.js 或 Python；程序暂未签名。
+当前版本：**0.16.8-preview**。Windows 10/11 x64，.NET Framework 4.8。便携运行，无需 Node.js 或 Python；程序暂未签名。
 
 ## 下载与启动
 
-仓库发布后，在 GitHub **Releases → Assets** 下载 `CodeTabs-0.16.7-preview-windows-x64-portable.zip` 及同名 `.sha256` 文件。GitHub 自动提供的 Source code ZIP 是源码，不包含编译后的程序。
+在 [GitHub Releases](https://github.com/HyranX/codetabs/releases) 的 **Assets** 中下载 `CodeTabs-0.16.8-preview-windows-x64-portable.zip` 及同名 `.sha256` 文件。GitHub 自动提供的 Source code ZIP 是源码，不包含编译后的程序。
 
 1. 将便携包解压到固定、可写的目录。
 2. 双击 `CodeTabs.exe`。
 3. 点击“全部接入 VS Code”，或通过菜单选择其他窗口。
 4. 升级前正常退出旧版，再替换程序；保留旁边的 `config/` 即可保留本地设置。
 
-当前工作区的已编译下载包位于 `releases/`，该目录不进入源码提交。公开仓库尚未创建时，不存在在线下载地址。
+当前工作区的已编译下载包位于 `releases/`，该目录不进入源码提交。在线下载由版本标签触发的 GitHub Actions 构建生成。
 
 ## 主要功能
 

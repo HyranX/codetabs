@@ -1,6 +1,6 @@
-# 发布到 GitHub
+﻿# 发布到 GitHub
 
-当前版本为 `0.16.7-preview`。本项目尚未绑定远程仓库；以下命令中的 `OWNER/REPO` 需要换成你创建的仓库。
+当前版本为 `0.16.8-preview`。公开仓库为 https://github.com/HyranX/codetabs 。以下首次推送示例中的 `OWNER/REPO` 用于新建仓库；现有仓库无需重复添加 origin。
 
 ## 首次推送
 
@@ -21,23 +21,23 @@ git push -u origin main
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Package.ps1
 ```
 
-下载附件是 `releases/CodeTabs-0.16.7-preview-windows-x64-portable.zip` 和同名 `.sha256`。历史包不会自动覆盖。源码打包与便携 EXE 下载是两回事。
+下载附件是 `releases/CodeTabs-0.16.8-preview-windows-x64-portable.zip` 和同名 `.sha256`。历史包不会自动覆盖。源码打包与便携 EXE 下载是两回事。
 
 ### 方式一：使用已验证的本机便携包
 
-在 GitHub 的 Releases 页面创建发布，标签填写 `v0.16.7-preview`，标记为预发布；将 ZIP 与 `.sha256` 拖入附件区，发布说明采用 `docs/release-notes.txt`。
+在 GitHub 的 Releases 页面创建发布，标签填写 `v0.16.8-preview`，标记为预发布；将 ZIP 与 `.sha256` 拖入附件区，发布说明采用 `docs/release-notes.txt`。
 
 也可以安装并登录 GitHub CLI 后执行：
 
 ```powershell
-git tag -a v0.16.7-preview -m "CodeTabs 0.16.7-preview"
-git push origin v0.16.7-preview
+git tag -a v0.16.8-preview -m "CodeTabs 0.16.8-preview"
+git push origin v0.16.8-preview
 ```
 
 注意：仓库已包含标签触发的自动发布流程。若希望手工上传本机包，先在仓库 Actions 中禁用自动发布流程，避免同一标签同时创建两个发布。
 
 ```powershell
-gh release create v0.16.7-preview ./releases/CodeTabs-0.16.7-preview-windows-x64-portable.zip ./releases/CodeTabs-0.16.7-preview-windows-x64-portable.zip.sha256 --verify-tag --prerelease --title "CodeTabs 0.16.7-preview" --notes-file docs/release-notes.txt
+gh release create v0.16.8-preview ./releases/CodeTabs-0.16.8-preview-windows-x64-portable.zip ./releases/CodeTabs-0.16.8-preview-windows-x64-portable.zip.sha256 --verify-tag --prerelease --title "CodeTabs 0.16.8-preview" --notes-file docs/release-notes.txt
 ```
 
 ### 方式二：自动发布
