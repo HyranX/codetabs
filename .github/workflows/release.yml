@@ -1,0 +1,47 @@
+name: Release Windows portable
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Audit public source and validate tag
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          ./scripts/Check-Public.ps1
+          $assembly = [IO.File]::ReadAllText('src/AssemblyInfo.cs')
+          $version = [regex]::Match($assembly, 'AssemblyInformationalVersion\("([^"]+)"\)').Groups[1].Value
+          if ($env:RELEASE_TAG -cne "v$version") { throw 'Tag does not match assembly version' }
+      - name: Build and verify portable package (no interactive desktop)
+        shell: pwsh
+        run: ./scripts/Package.ps1 -ScratchRoot $env:RUNNER_TEMP -SkipUiTests
+      - name: Publish download assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $version = $env:RELEASE_TAG.Substring(1)
+          $zip = "releases/CodeTabs-$version-windows-x64-portable.zip"
+          $args = @('release', 'create', $env:RELEASE_TAG, $zip, "$zip.sha256", '--verify-tag', '--title', "CodeTabs $version", '--notes-file', 'docs/release-notes.txt')
+          if ($version.Contains('-')) { $args += '--prerelease' }
+          & gh @args
+          if ($LASTEXITCODE -ne 0) { throw 'GitHub Release creation failed' }
