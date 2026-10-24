@@ -210,6 +210,7 @@ sealed class MainForm : Form
     readonly string settings=PortableConfig.FilePath("shortcuts.txt");
     HostApi.HookProc hookProc,mouseProc; IntPtr hook,mouseHook; bool dialogOpen, layoutPending;
     HostApi.WinEventProc moveProc; IntPtr moveHook,movingWindow;
+    HostApi.WinEventProc foregroundProc; IntPtr foregroundHook;
     Native.RectangleEdges moveStart;
     WindowSnapshot moveSnapshot;
     bool focusQueued;
@@ -283,7 +284,7 @@ sealed class MainForm : Form
         surface.SizeChanged+=delegate { Fit(); QueueFit(); };
         Resize+=delegate { QueueFit(); };
         LocationChanged+=delegate { if(IsHandleCreated&&!closing) UpdateCompatible(ManagedForeground(HostApi.GetForegroundWindow())); };
-        Load+=delegate { LoadSettings(); vscodeCompatible=ReadCompatibleMode(windowModeSettings); imeModeItem.Checked=vscodeCompatible; UpdateKeyboardHook(); InstallMouseHook(); InstallMoveHook(); };
+        Load+=delegate { LoadSettings(); vscodeCompatible=ReadCompatibleMode(windowModeSettings); imeModeItem.Checked=vscodeCompatible; UpdateKeyboardHook(); InstallMouseHook(); InstallMoveHook(); InstallForegroundHook(); };
         timer.Tick+=delegate { Tick(); }; timer.Start();
         FormClosing+=delegate(object sender,FormClosingEventArgs e) {
             if(restoredForExit) return;
@@ -291,7 +292,7 @@ sealed class MainForm : Form
             if(closing) return;
             closing=true; Enabled=false; RestoreAll(); FinishRestores();
         };
-        FormClosed+=delegate { timer.Dispose(); codex.Dispose(); if(notifications!=null) notifications.Dispose(); if(moveHook!=IntPtr.Zero) HostApi.UnhookWinEvent(moveHook); if(hook!=IntPtr.Zero) HostApi.UnhookWindowsHookEx(hook); if(mouseHook!=IntPtr.Zero) HostApi.UnhookWindowsHookEx(mouseHook); menu.Dispose(); };
+        FormClosed+=delegate { timer.Dispose(); codex.Dispose(); if(notifications!=null) notifications.Dispose(); if(moveHook!=IntPtr.Zero) HostApi.UnhookWinEvent(moveHook); if(foregroundHook!=IntPtr.Zero) HostApi.UnhookWinEvent(foregroundHook); if(hook!=IntPtr.Zero) HostApi.UnhookWindowsHookEx(hook); if(mouseHook!=IntPtr.Zero) HostApi.UnhookWindowsHookEx(mouseHook); menu.Dispose(); };
     }
     void Error(string message) { MessageBox.Show(this,message,"Code Tabs",MessageBoxButtons.OK,MessageBoxIcon.Information); }
     static bool IsCodeProcess(string name) { return name.Equals("Code",StringComparison.OrdinalIgnoreCase)||name.Equals("Code - Insiders",StringComparison.OrdinalIgnoreCase); }
@@ -541,7 +542,9 @@ sealed class MainForm : Form
         if(String.IsNullOrWhiteSpace(project.ProjectPath)||(!Overview.IsRemote(project)&&!Directory.Exists(project.ProjectPath))) { Error("无法读取项目目录，请使用卡片菜单更改目录后打开。"); return; }
         pendingOverview=project; NewWindow(); if(beforeLaunch==null) pendingOverview=null;
     }
-    void UpdateCompatible(bool raise) {
+    void UpdateCompatible(bool raise) { UpdateCompatible(raise,HostApi.GetForegroundWindow()); }
+    void UpdateCompatible(bool raise,IntPtr foreground) {
+        FollowCompatibleForeground(foreground);
         foreach(var h in hosted) if(h.Compatible && Native.IsWindow(h.Handle)) {
             bool show=!closing && h==strip.Selected && Visible && Enabled && !dialogOpen && WindowState!=FormWindowState.Minimized;
             bool visible=Native.IsWindowVisible(h.Handle);
@@ -567,6 +570,24 @@ sealed class MainForm : Form
         int limit=2048;
         for(IntPtr w=HostApi.GetWindow(reference,3);w!=IntPtr.Zero&&limit-->0;w=HostApi.GetWindow(w,3)) if(w==window) return true;
         return false;
+    }
+    void FollowCompatibleForeground(IntPtr foreground) {
+        var h=strip.Selected;
+        if(closing||IsDisposed||!Visible||!Enabled||dialogOpen||menu.Visible||WindowState==FormWindowState.Minimized||h==null||!h.Compatible||!Native.IsWindowVisible(h.Handle)||!InWindow(h.Handle,foreground)) return;
+        if(HostApi.GetWindow(h.Handle,2)==Handle) return;
+        // Keep the container immediately below the active app, without activating
+        // it or creating an owner/parent relationship that couples input queues.
+        Native.SetWindowPos(Handle,h.Handle,0,0,0,0,0x0213);
+    }
+    void InstallForegroundHook() {
+        foregroundProc=delegate(IntPtr hookId,uint ev,IntPtr window,int objectId,int childId,uint thread,uint time) {
+            if(closing||IsDisposed) return;
+            // Ignore stale events when the user has already switched elsewhere.
+            IntPtr current=HostApi.GetForegroundWindow();
+            if(current==window) FollowCompatibleForeground(current);
+        };
+        foregroundHook=HostApi.SetWinEventHook(3,3,IntPtr.Zero,foregroundProc,0,0,0);
+        // The existing timer also checks foreground state if the event hook fails.
     }
     void RestoreBinding(Hosted h) {
         if(!h.IsVSCode) return;
@@ -955,6 +976,9 @@ sealed class MainForm : Form
     }
     void VerifyCompatibleMoveAndMenu(Hosted h) {
         bool running=timer.Enabled; timer.Stop(); Point original=Location;
+        // This test supplies controlled foreground snapshots: unattended desktops
+        // may deny foreground activation of a fixture. Test real z-order changes.
+        if(foregroundHook!=IntPtr.Zero) { HostApi.UnhookWinEvent(foregroundHook); foregroundHook=IntPtr.Zero; }
         try {
             for(int i=0;i<5;i++) {
                 Location=new Point(original.X+12*(i+1),original.Y+8*(i+1));
@@ -970,12 +994,33 @@ sealed class MainForm : Form
             }
             if(!above) throw new Exception("Compatible window remained behind container");
             CheckBounds(h);
+            using(var middle=new Form { Text="Interleaved window fixture",Size=new Size(200,120) }) {
+                middle.Show();
+                Native.SetWindowPos(Handle,IntPtr.Zero,0,0,0,0,0x0013);
+                Native.SetWindowPos(middle.Handle,IntPtr.Zero,0,0,0,0,0x0013);
+                Native.SetWindowPos(h.Handle,IntPtr.Zero,0,0,0,0,0x0013);
+                IntPtr foreground=HostApi.GetForegroundWindow();
+                FollowCompatibleForeground(middle.Handle);
+                if(!WindowAbove(middle.Handle,Handle)) throw new Exception("Unrelated foreground raised container");
+                FollowCompatibleForeground(h.Handle);
+                if(HostApi.GetWindow(h.Handle,2)!=Handle||!WindowAbove(Handle,middle.Handle)) throw new Exception("Active app did not bring container directly behind it");
+                if(HostApi.GetForegroundWindow()!=foreground) throw new Exception("Container grouping changed foreground focus");
+                bool autoClose=menu.AutoClose;
+                try {
+                    menu.AutoClose=false; menu.Show(strip,new Point(60,strip.Height));
+                    if(!menu.Visible) throw new Exception("Grouping guard menu not opened");
+                    Native.SetWindowPos(middle.Handle,h.Handle,0,0,0,0,0x0013);
+                    IntPtr before=HostApi.GetWindow(Handle,3);
+                    FollowCompatibleForeground(h.Handle);
+                    if(HostApi.GetWindow(Handle,3)!=before) throw new Exception("Grouping interfered with open menu");
+                } finally { menu.Close(); menu.AutoClose=autoClose; }
+            }
             // Simulate a late activation after our asynchronous placement request.
             Native.SetWindowPos(Handle,IntPtr.Zero,0,0,0,0,0x0013);
             using(var unrelated=new Form { Text="Unrelated foreground stand-in",Size=new Size(200,120) }) {
                 unrelated.Show(); Native.SetWindowPos(unrelated.Handle,IntPtr.Zero,0,0,0,0,0x0013);
                 watch.Restart();
-                do { UpdateCompatible(false); Application.DoEvents(); System.Threading.Thread.Sleep(10); }
+                do { UpdateCompatible(false,unrelated.Handle); Application.DoEvents(); System.Threading.Thread.Sleep(10); }
                 while(!WindowAbove(h.Handle,Handle)&&watch.ElapsedMilliseconds<1500);
                 if(!WindowAbove(h.Handle,Handle)) throw new Exception("Late container activation remained blank");
                 if(!WindowAbove(unrelated.Handle,h.Handle)) throw new Exception("Passive repair raised over unrelated window");
@@ -985,12 +1030,15 @@ sealed class MainForm : Form
             do { UpdateCompatible(false); Application.DoEvents(); System.Threading.Thread.Sleep(10); }
             while(!Native.IsWindowVisible(h.Handle)&&watch.ElapsedMilliseconds<1500);
             if(!Native.IsWindowVisible(h.Handle)) throw new Exception("Cached visibility prevented redisplay");
+            // A real right click activates the container before MouseDown. Drain
+            // earlier fixture messages, then reproduce that order without a pump.
+            Application.DoEvents(); Activate();
             strip.OpenMenuForTest(h);
             if(!menu.Visible||!h.CompatVisible) throw new Exception("Right-click menu not visible or target hidden");
             UpdateCompatible(true); Application.DoEvents();
             if(!menu.Visible||!Native.IsWindowVisible(h.Handle)) throw new Exception("Right-click menu lost focus or target flickered");
             menu.Close();
-        } finally { menu.Close(); Location=original; if(running) timer.Start(); }
+        } finally { menu.Close(); Location=original; InstallForegroundHook(); if(running) timer.Start(); }
         Console.Error.WriteLine("Compatible movement/menu: immediate layout, visible content and correct z-order passed");
     }
     void VerifyInputIsolation(Hosted h) {

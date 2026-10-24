@@ -2,11 +2,11 @@
 
 Windows 桌面窗口标签管理器，附带本地 Codex 会话总览。适合同时打开多个 VS Code 项目时集中切换窗口、查看任务状态。
 
-当前版本：**0.16.8-preview**。Windows 10/11 x64，.NET Framework 4.8。便携运行，无需 Node.js 或 Python；程序暂未签名。
+当前版本：**0.16.9-preview**。Windows 10/11 x64，.NET Framework 4.8。便携运行，无需 Node.js 或 Python；程序暂未签名。
 
 ## 下载与启动
 
-在 [GitHub Releases](https://github.com/HyranX/codetabs/releases) 的 **Assets** 中下载 `CodeTabs-0.16.8-preview-windows-x64-portable.zip` 及同名 `.sha256` 文件。GitHub 自动提供的 Source code ZIP 是源码，不包含编译后的程序。
+在 [GitHub Releases](https://github.com/HyranX/codetabs/releases) 的 **Assets** 中下载 `CodeTabs-0.16.9-preview-windows-x64-portable.zip` 及同名 `.sha256` 文件。GitHub 自动提供的 Source code ZIP 是源码，不包含编译后的程序。
 
 1. 将便携包解压到固定、可写的目录。
 2. 双击 `CodeTabs.exe`。
@@ -19,6 +19,7 @@ Windows 桌面窗口标签管理器，附带本地 Codex 会话总览。适合�
 
 - 窗口标签切换、拖拽排序、移出和正常关闭；支持置顶、自动尺寸同步。
 - VS Code 默认使用**输入法兼容模式**：保留独立窗口、原边框及任务栏项，避免跨进程嵌入引起的输入法冲突。
+- 点击当前 VS Code 时，CodeTabs 标签栏所在容器会跟随到它正下方；输入焦点保留在 VS Code。
 - 移出窗口或正常退出时，恢复接入前的位置、像素尺寸和最大化状态；支持多屏及混合缩放。
 - Codex 总览：按项目或独立对话浏览、搜索、重命名、隐藏和置顶；显示执行状态与完成提醒。
 - 全部偏好保存在程序旁的 `config/`，可随便携目录迁移。

@@ -1,4 +1,4 @@
-﻿CodeTabs 0.16.8-preview · Windows x64 便携版
+﻿CodeTabs 0.16.9-preview · Windows x64 便携版
 
 启动：解压到可写目录，双击 CodeTabs.exe。要求 Windows 10/11 x64 和 .NET Framework 4.8。
 程序未签名。发布 ZIP 的 SHA-256 校验文件随下载提供。
