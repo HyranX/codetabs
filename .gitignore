@@ -1,0 +1,39 @@
+# Private runtime state and local development context
+/config/
+/.codex/
+/.agents/
+/.local/
+
+# Distribute binaries through GitHub Releases, not source history
+/CodeTabs.exe
+/versions/
+/releases/
+*.exe
+*.dll
+*.pdb
+*.zip
+*.bak
+*.log
+
+# Credentials and local environments
+.env
+.env.*
+*.pem
+*.key
+*.pfx
+*.p12
+*credentials*.json
+node_modules/
+.venv/
+venv/
+__pycache__/
+.pytest_cache/
+.cache/
+.vs/
+.vscode/
+bin/
+obj/
+build/
+dist/
+Thumbs.db
+Desktop.ini
