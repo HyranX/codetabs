@@ -103,6 +103,14 @@ static class Program
         if(args.Length==2 && args[0]=="--overview-test") { Overview.Verify(args[1]); return; }
         if(args.Length==2 && args[0]=="--binding-test") { BindingStore.VerifyDisk(args[1]); return; }
         if(args.Length==2 && args[0]=="--window-layout-test") { try { SavedWindowLayout.Verify(args[1]); } catch(Exception ex) { Console.Error.WriteLine(ex); Environment.Exit(1); } return; }
+        if(args.Length==2 && args[0]=="--window-layout-ui-test") {
+            Exception failure=null;
+            using(var form=new MainForm(false)) {
+                form.Shown+=delegate { form.BeginInvoke((Action)delegate { try { form.VerifyWindowLayoutUi(args[1]); } catch(Exception ex) { failure=ex; } finally { form.Close(); } }); };
+                Application.Run(form);
+            }
+            if(failure!=null) { Console.Error.WriteLine(failure); Environment.Exit(1); } return;
+        }
         if(args.Length==2 && args[0]=="--notification-test") { try { CodexState.VerifyNotifications(args[1]); } catch(Exception ex) { Console.Error.WriteLine(ex); Environment.Exit(1); } return; }
         if(args.Length>0 && args[0]=="--startup-test") {
             using(var form=new MainForm(false)) using(var timer=new Timer { Interval=1200 }) {

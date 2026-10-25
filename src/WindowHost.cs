@@ -73,9 +73,45 @@ sealed class TabStrip : Control
     readonly ToolTip tip=new ToolTip();
     int offset, dragIndex=-1; Point dragStart; bool dragging; int dropIndex=-1;
     Point hoverPoint=new Point(-1,-1);
-    const int TabWidth=250;
+    int[] tabWidths=new int[0];
+    int dpi=96;
+    Font dpiFont;
+    int TabWidth { get { return (int)Math.Round(250*dpi/96.0); } }
     const int HomeWidth=40;
-    Rectangle TabRect(int i) { return new Rectangle(HomeWidth+i*TabWidth-offset+3,4,TabWidth-6,Height-8); }
+    int TabLeft(int i) { int x=0; for(int j=0;j<i && j<tabWidths.Length;j++) x+=tabWidths[j]; return x; }
+    string TabTitle(int i) { return Native.Title(Items[i].Handle).Replace(" - Visual Studio Code",""); }
+    Rectangle TabRect(int i) { return new Rectangle(HomeWidth+TabLeft(i)-offset+3,4,(i<tabWidths.Length?tabWidths[i]:TabWidth)-6,Height-8); }
+    internal static int[] AllocateWidths(int[] desired,int available,int maximum,int minimum) {
+        var widths=Enumerable.Repeat(maximum,desired.Length).ToArray();
+        int excess=widths.Sum()-available;
+        foreach(int i in Enumerable.Range(0,desired.Length).OrderBy(i=>desired[i])) {
+            if(excess<=0) break;
+            int take=Math.Min(excess,Math.Max(0,widths[i]-Math.Max(minimum,Math.Min(maximum,desired[i]))));
+            widths[i]-=take; excess-=take;
+        }
+        while(excess>0) {
+            int widest=widths.Length==0?minimum:widths.Max();
+            if(widest<=minimum) break;
+            var shrink=Enumerable.Range(0,widths.Length).Where(i=>widths[i]==widest).ToArray();
+            int next=widths.Where(w=>w<widest).DefaultIfEmpty(minimum).Max();
+            int step=Math.Min(widest-next,Math.Max(1,(excess+shrink.Length-1)/shrink.Length));
+            foreach(int i in shrink) { int take=Math.Min(excess,Math.Min(step,widths[i]-minimum)); widths[i]-=take; excess-=take; }
+        }
+        return widths;
+    }
+    void LayoutTabs() {
+        if(Items==null) return;
+        int minimum=104+(int)Math.Round(24*dpi/96.0);
+        tabWidths=AllocateWidths(Enumerable.Range(0,Items.Count).Select(i=>TextRenderer.MeasureText(TabTitle(i),Font).Width+104).ToArray(),ViewWidth,TabWidth,minimum);
+    }
+    public void RefreshDpi() {
+        if(!IsHandleCreated) return;
+        int next=(int)WindowRestore.GetDpiForWindow(Handle); if(next<=0) next=96;
+        if(next==dpi && dpiFont!=null) return;
+        dpi=next;
+        var old=dpiFont; dpiFont=new Font("Microsoft YaHei UI",13*dpi/96f,FontStyle.Regular,GraphicsUnit.Pixel); Font=dpiFont;
+        Height=Math.Max(36,Font.Height+16); if(old!=null) old.Dispose(); Reveal();
+    }
     Rectangle ActionRect(int i,bool close) { var r=TabRect(i); return new Rectangle(r.Right-(close?30:60),r.Y+3,27,r.Height-6); }
     public TabStrip(List<Hosted> items) {
         Items=items; Height=36; Dock=DockStyle.Top; Cursor=Cursors.Hand;
@@ -100,11 +136,12 @@ sealed class TabStrip : Control
     public void StartPick() { picking=true; Capture=true; Cursor=Cursors.Cross; Invalidate(); if(PickingChanged!=null) PickingChanged(); }
     public void CancelPick() { picking=false; Capture=false; Cursor=Cursors.Hand; Invalidate(); if(PickingChanged!=null) PickingChanged(); }
     int ViewWidth { get { return Math.Max(1,Space-HomeWidth); } }
-    int Hit(Point p) { if(p.X<HomeWidth || p.X>=Space) return -1; int i=(p.X-HomeWidth+offset)/TabWidth; return i<Items.Count?i:-1; }
-    public void Reveal() { int i=Items.IndexOf(Selected); if(i>=0) { if(i*TabWidth<offset) offset=i*TabWidth; if((i+1)*TabWidth>offset+ViewWidth) offset=(i+1)*TabWidth-ViewWidth; } Clamp(); Invalidate(); }
-    void Clamp() { offset=Math.Max(0,Math.Min(offset,Math.Max(0,Items.Count*TabWidth-ViewWidth))); }
+    int Hit(Point p) { if(p.X<HomeWidth || p.X>=Space) return -1; int x=p.X-HomeWidth+offset; for(int i=0;i<tabWidths.Length;i++) { if(x<tabWidths[i]) return i; x-=tabWidths[i]; } return -1; }
+    public void Reveal() { LayoutTabs(); int i=Items.IndexOf(Selected); if(i>=0) { int left=TabLeft(i); if(left<offset) offset=left; if(left+tabWidths[i]>offset+ViewWidth) offset=left+tabWidths[i]-ViewWidth; } Clamp(); Invalidate(); }
+    void Clamp() { offset=Math.Max(0,Math.Min(offset,Math.Max(0,tabWidths.Sum()-ViewWidth))); }
     protected override void OnResize(EventArgs e) { base.OnResize(e); Reveal(); }
     protected override void OnPaint(PaintEventArgs e) {
+        LayoutTabs(); Clamp();
         e.Graphics.Clear(Color.FromArgb(25,29,37));
         using(var brush=new SolidBrush(OverviewSelected?Color.FromArgb(34,112,204):Color.FromArgb(49,55,66))) e.Graphics.FillRectangle(brush,new Rectangle(3,4,HomeWidth-6,Height-8));
         DrawToolbarIcon(e.Graphics,new Rectangle(0,0,HomeWidth,Height),"home",Color.White);
@@ -113,14 +150,14 @@ sealed class TabStrip : Control
             var r=TabRect(i); bool active=Items[i]==Selected;
             using(var brush=new SolidBrush(active?Color.FromArgb(34,112,204):Color.FromArgb(49,55,66))) e.Graphics.FillRectangle(brush,r);
             if(active) using(var brush=new SolidBrush(Color.FromArgb(108,203,255))) e.Graphics.FillRectangle(brush,r.X,r.Bottom-3,r.Width,3);
-            string title=Native.Title(Items[i].Handle).Replace(" - Visual Studio Code","");
+            string title=TabTitle(i);
             CodexState.Draw(e.Graphics,Items[i],new Rectangle(r.X+9,r.Y+(r.Height-17)/2,17,17));
             TextRenderer.DrawText(e.Graphics,title,Font,new Rectangle(r.X+33,r.Y,r.Width-97,r.Height-2),active?Color.White:Color.FromArgb(198,205,216),TextFormatFlags.VerticalCenter|TextFormatFlags.EndEllipsis|TextFormatFlags.SingleLine);
             DrawAction(e.Graphics,ActionRect(i,false),false);
             DrawAction(e.Graphics,ActionRect(i,true),true);
         }
         if(Items.Count==0) TextRenderer.DrawText(e.Graphics,"双击空白处新建 VS Code",Font,new Rectangle(HomeWidth+8,0,Math.Max(0,ViewWidth-8),Height),Color.LightGray,TextFormatFlags.VerticalCenter);
-        if(dragging && dropIndex>=0) using(var pen=new Pen(Color.Cyan,3)) e.Graphics.DrawLine(pen,HomeWidth+dropIndex*TabWidth-offset,3,HomeWidth+dropIndex*TabWidth-offset,Height-3);
+        if(dragging && dropIndex>=0) using(var pen=new Pen(Color.Cyan,3)) e.Graphics.DrawLine(pen,HomeWidth+TabLeft(dropIndex)-offset,3,HomeWidth+TabLeft(dropIndex)-offset,Height-3);
         e.Graphics.ResetClip();
         DrawToolbarIcon(e.Graphics,NewRect,"new",Color.White);
         if(picking) using(var brush=new SolidBrush(Color.FromArgb(21,112,175))) e.Graphics.FillRectangle(brush,Rectangle.Inflate(PickRect,-2,-4));
@@ -156,8 +193,8 @@ sealed class TabStrip : Control
         if(PickRect.Contains(point)) return "拖拽接入：按住并拖向目标窗口，松开接入；Esc 取消";
         if(AllRect.Contains(point)) return "全部接入 VS Code";
         if(RemoveRect.Contains(point)) return "移出全部 VS Code，恢复独立窗口（不关闭应用）";
-        if(SaveRect.Contains(point)) return "保存当前窗口组合及标签顺序（覆盖上次保存）";
-        if(RestoreRect.Contains(point)) return "恢复已保存的窗口组合及顺序";
+        if(SaveRect.Contains(point)) return "将当前窗口及顺序存入组合列表";
+        if(RestoreRect.Contains(point)) return "窗口组合列表：选择恢复或删除";
         if(PinRect.Contains(point)) return Pinned?"取消置顶":"窗口置顶";
         if(MenuRect.Contains(point)) return "菜单：更多操作与设置";
         return "";
@@ -198,7 +235,9 @@ sealed class TabStrip : Control
         if(Math.Abs(e.X-dragStart.X)>SystemInformation.DragSize.Width) dragging=true;
         if(!dragging) return;
         if(e.X<HomeWidth+24) offset-=12; else if(e.X>Space-24) offset+=12;
-        Clamp(); dropIndex=Math.Max(0,Math.Min(Items.Count,(e.X-HomeWidth+offset+TabWidth/2)/TabWidth)); Invalidate();
+        Clamp(); int x=e.X-HomeWidth+offset; dropIndex=0;
+        while(dropIndex<tabWidths.Length && x>TabLeft(dropIndex)+tabWidths[dropIndex]/2) dropIndex++;
+        Invalidate();
     }
     protected override void OnMouseUp(MouseEventArgs e) {
         if(picking) { CancelPick(); if(e.Button==MouseButtons.Left && PickWindowAt!=null) PickWindowAt(PointToScreen(e.Location)); return; }
@@ -211,15 +250,23 @@ sealed class TabStrip : Control
     protected override void OnMouseDoubleClick(MouseEventArgs e) { if(e.Button==MouseButtons.Left && e.X>=HomeWidth && e.X<Space && Hit(e.Location)<0) NewWindow(); base.OnMouseDoubleClick(e); }
     protected override void OnMouseWheel(MouseEventArgs e) { offset-=Math.Sign(e.Delta)*TabWidth; Clamp(); Invalidate(); base.OnMouseWheel(e); }
     protected override void OnMouseLeave(EventArgs e) { hoverPoint=new Point(-1,-1); Invalidate(); base.OnMouseLeave(e); }
-    protected override void Dispose(bool disposing) { if(disposing) tip.Dispose(); base.Dispose(disposing); }
+    protected override void Dispose(bool disposing) { if(disposing) { tip.Dispose(); if(dpiFont!=null) dpiFont.Dispose(); } base.Dispose(disposing); }
     public void VerifyDrag() {
-        var first=Items[0]; offset=0;
+        var first=Items[0]; offset=0; LayoutTabs(); int end=HomeWidth+TabLeft(2)-10;
         OnMouseDown(new MouseEventArgs(MouseButtons.Left,1,HomeWidth+50,20,0));
-        OnMouseMove(new MouseEventArgs(MouseButtons.Left,0,HomeWidth+TabWidth*2-10,20,0));
-        OnMouseUp(new MouseEventArgs(MouseButtons.Left,1,HomeWidth+TabWidth*2-10,20,0));
+        OnMouseMove(new MouseEventArgs(MouseButtons.Left,0,end,20,0));
+        OnMouseUp(new MouseEventArgs(MouseButtons.Left,1,end,20,0));
         if(Items[1]!=first || Selected!=first) throw new Exception("Drag ordering failed");
     }
     public void VerifyToolbar() {
+        var shortFirst=AllocateWidths(new[]{130,240,220},600,250,128);
+        if(shortFirst.Sum()!=600 || shortFirst[0]!=130 || shortFirst[1]<shortFirst[2]) throw new Exception("Short titles did not compress first");
+        var preserveShort=AllocateWidths(new[]{145,375,145,375},650,375,140);
+        if(preserveShort[0]!=145 || preserveShort[2]!=145 || preserveShort.Sum()!=650) throw new Exception("Short titles truncated while longer tabs could shrink");
+        var overflow=AllocateWidths(new[]{130,240,220},200,250,128);
+        if(overflow.Any(w=>w<128) || overflow.Sum()!=384) throw new Exception("Overflow tab targets became too small");
+        LayoutTabs();
+        for(int i=0;i<Items.Count;i++) { var tab=TabRect(i); if(tab.Left>=HomeWidth && tab.Right<=Space && Hit(new Point(tab.Left+5,Height/2))!=i) throw new Exception("Variable tab hit testing failed"); }
         var buttons=new[]{NewRect,PickRect,AllRect,RemoveRect,SaveRect,RestoreRect,PinRect,MenuRect};
         for(int i=0;i<buttons.Length;i++) {
             var r=buttons[i];
@@ -297,8 +344,8 @@ sealed class MainForm : Form
         menu.Items.Add("接入全部 VS Code 窗口",null,delegate { AttachAll(); });
         menu.Items.Add("选择应用窗口接入…",null,delegate { Pick(); });
         menu.Items.Add("移出全部 VS Code（不关闭）",null,delegate { RemoveAllCode(); });
-        menu.Items.Add("保存当前窗口组合及顺序",null,delegate { SaveWindowLayout(); });
-        menu.Items.Add("恢复已保存的窗口组合",null,delegate { RestoreWindowLayout(); });
+        menu.Items.Add("存入当前窗口组合…",null,delegate { SaveWindowLayout(); });
+        menu.Items.Add("窗口组合列表（恢复 / 删除）…",null,delegate { RestoreWindowLayout(); });
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("移出当前标签",null,delegate { if(strip.Selected!=null) Detach(strip.Selected); });
         menu.Items.Add("关闭当前应用窗口",null,delegate { if(strip.Selected!=null) CloseTab(strip.Selected); });
@@ -369,20 +416,120 @@ sealed class MainForm : Form
     void RemoveAllCode() {
         foreach(var h in hosted.Where(x=>x.IsVSCode).ToArray()) Detach(h);
     }
-    void SaveWindowLayout() {
+    void SaveWindowLayout() { ManageWindowLayouts(true); }
+    void RestoreWindowLayout() { ManageWindowLayouts(false); }
+    string layoutTestDirectory;
+    Action<Form> layoutDialogTest;
+    void ManageWindowLayouts(bool saving) {
+        NamedWindowLayout restore=null;
+        dialogOpen=true;
         try {
-            var windows=hosted.Where(x=>Native.IsWindow(x.Handle)).ToList();
-            if(windows.Count==0) { Error("当前没有已组合的窗口，原有配置未改动。"); return; }
-            var layout=new SavedWindowLayout { Windows=windows.Select(SavedWindow.Capture).ToList(), Selected=windows.IndexOf(strip.Selected) };
-            layout.Save(PortableConfig.FilePath("window-layout.json"));
-            Error("已保存 "+windows.Count+" 个窗口及当前顺序。下次点击“恢复窗口组合”图标即可重新接入已打开的窗口。");
-        } catch(Exception ex) { Error("保存窗口组合失败："+ex.Message); }
+            string path=PortableConfig.FilePath("window-layouts.json"),legacy=PortableConfig.FilePath("window-layout.json");
+            if(layoutTestDirectory!=null) { path=Path.Combine(layoutTestDirectory,"window-layouts.json"); legacy=Path.Combine(layoutTestDirectory,"window-layout.json"); }
+            var library=WindowLayoutLibrary.Read(path,legacy);
+            using(var d=new Form { Text="窗口组合",ClientSize=new Size(760,440),MinimumSize=new Size(680,400),StartPosition=FormStartPosition.CenterParent,Font=Font,AutoScaleMode=AutoScaleMode.Dpi }) {
+                var list=new ListBox { Name="layouts",Dock=DockStyle.Fill,HorizontalScrollbar=true,IntegralHeight=false };
+                var details=new ListBox { Name="windows",Dock=DockStyle.Fill,HorizontalScrollbar=true,IntegralHeight=false };
+                var split=new SplitContainer { Dock=DockStyle.Fill,Width=760,SplitterDistance=260 };
+                split.Panel1.Controls.Add(list); split.Panel2.Controls.Add(details);
+                var info=new Label { Dock=DockStyle.Top,Height=Font.Height*2+20,Text="选择已保存的组合，查看窗口顺序后恢复。\n恢复需要应用窗口已打开；其他已有标签将保留在末尾。",Padding=new Padding(8) };
+                var name=new TextBox { Name="layoutName",Width=230,MaxLength=80,Text="组合 "+DateTime.Now.ToString("MM-dd HH:mm:ss") };
+                var save=new Button { Text="存入当前组合",AutoSize=true };
+                var use=new Button { Text="恢复所选组合",AutoSize=true,Enabled=false };
+                var remove=new Button { Text="删除所选",AutoSize=true,Enabled=false };
+                var close=new Button { Text="关闭",AutoSize=true,DialogResult=DialogResult.Cancel };
+                var status=new Label { Dock=DockStyle.Bottom,Height=Font.Height+10,Padding=new Padding(8,3,0,0) };
+                var saveBar=new FlowLayoutPanel { Dock=DockStyle.Bottom,Height=Font.Height+24,Padding=new Padding(6),WrapContents=false };
+                saveBar.Controls.Add(new Label { Text="组合名称",AutoSize=true,Margin=new Padding(3,6,3,3) }); saveBar.Controls.Add(name); saveBar.Controls.Add(save);
+                var buttons=new FlowLayoutPanel { Dock=DockStyle.Bottom,Height=Font.Height+24,Padding=new Padding(6),WrapContents=false };
+                buttons.Controls.Add(use); buttons.Controls.Add(remove); buttons.Controls.Add(close);
+                Action<string> reload=delegate(string id) {
+                    list.Items.Clear(); foreach(var entry in library.Items) list.Items.Add(entry);
+                    list.SelectedIndex=library.Items.FindIndex(x=>x.Id==id);
+                    if(list.SelectedIndex<0 && list.Items.Count>0) list.SelectedIndex=0;
+                    status.Text=library.Items.Count==0?"尚无组合。输入名称后存入当前窗口。":"已保存 "+library.Items.Count+" 个组合";
+                };
+                list.SelectedIndexChanged+=delegate {
+                    details.Items.Clear(); var entry=list.SelectedItem as NamedWindowLayout; use.Enabled=remove.Enabled=entry!=null;
+                    if(entry!=null) for(int i=0;i<entry.Layout.Windows.Count;i++) details.Items.Add((i+1)+". "+entry.Layout.Windows[i].Title+"  ["+entry.Layout.Windows[i].App+"]");
+                };
+                save.Click+=delegate {
+                    try {
+                        var windows=hosted.Where(x=>Native.IsWindow(x.Handle)).ToList();
+                        if(windows.Count==0) { status.Text="当前没有已组合的窗口。"; return; }
+                        var updated=WindowLayoutLibrary.Read(path,legacy);
+                        var entry=updated.Add(name.Text,new SavedWindowLayout { Windows=windows.Select(SavedWindow.Capture).ToList(),Selected=windows.IndexOf(strip.Selected) });
+                        updated.Save(path); library=updated; reload(entry.Id); status.Text="已保存："+entry.Name;
+                    } catch(Exception ex) { MessageBox.Show(d,ex.Message,"保存失败",MessageBoxButtons.OK,MessageBoxIcon.Information); }
+                };
+                remove.Click+=delegate {
+                    var entry=list.SelectedItem as NamedWindowLayout; if(entry==null) return;
+                    try {
+                        var updated=WindowLayoutLibrary.Read(path,legacy); updated.Items.RemoveAll(x=>x.Id==entry.Id); updated.Save(path);
+                        library=updated; reload(null); status.Text="已删除组合："+entry.Name+"（应用窗口未关闭）";
+                    } catch(Exception ex) { MessageBox.Show(d,ex.Message,"删除失败",MessageBoxButtons.OK,MessageBoxIcon.Information); }
+                };
+                use.Click+=delegate { restore=list.SelectedItem as NamedWindowLayout; if(restore!=null) d.Close(); };
+                list.DoubleClick+=delegate { if(use.Enabled) use.PerformClick(); };
+                d.Controls.Add(split); d.Controls.Add(info); d.Controls.Add(status); d.Controls.Add(saveBar); d.Controls.Add(buttons); d.CancelButton=close;
+                reload(null); d.Shown+=delegate { if(saving) { name.Focus(); name.SelectAll(); } else list.Focus(); if(layoutDialogTest!=null) d.BeginInvoke((Action)delegate { layoutDialogTest(d); }); };
+                d.ShowDialog(this);
+            }
+        } catch(Exception ex) { Error("无法打开窗口组合："+ex.Message); }
+        finally { dialogOpen=false; }
+        if(restore!=null) RestoreWindowLayout(restore.Layout);
     }
-    void RestoreWindowLayout() {
+    static IEnumerable<Control> AllControls(Control root) {
+        foreach(Control child in root.Controls) { yield return child; foreach(var nested in AllControls(child)) yield return nested; }
+    }
+    public void VerifyWindowLayoutUi(string root) {
+        layoutTestDirectory=Path.Combine(root,"library-ui-"+Guid.NewGuid().ToString("N")); Directory.CreateDirectory(layoutTestDirectory);
+        testing=true; Exception failure=null;
+        using(var a=new Form { Text="微信" }) using(var b=new Form { Text="A long project title - Visual Studio Code" }) {
+            a.Show(); b.Show(); var ha=new Hosted { Handle=a.Handle,ApplicationName="Chat" }; var hb=new Hosted { Handle=b.Handle,ApplicationName="Code",IsVSCode=true };
+            Attach(ha); Attach(hb);
+            layoutDialogTest=delegate(Form d) {
+                try {
+                    var controls=AllControls(d).ToList(); var name=(TextBox)controls.First(x=>x.Name=="layoutName");
+                    var list=(ListBox)controls.First(x=>x.Name=="layouts"); var details=(ListBox)controls.First(x=>x.Name=="windows");
+                    name.Text="日常工作"; controls.OfType<Button>().First(x=>x.Text=="存入当前组合").PerformClick();
+                    name.Text="开发与沟通"; controls.OfType<Button>().First(x=>x.Text=="存入当前组合").PerformClick();
+                    if(list.Items.Count!=2 || details.Items.Count!=2 || !details.Items[0].ToString().Contains("微信")) throw new Exception("Library dialog save or preview failed");
+                    using(var bitmap=new Bitmap(d.Width,d.Height)) { d.DrawToBitmap(bitmap,new Rectangle(Point.Empty,bitmap.Size)); bitmap.Save(Path.Combine(root,"window-layout-library.png")); }
+                    hosted.Reverse(); Select(ha);
+                    controls.OfType<Button>().First(x=>x.Text=="恢复所选组合").PerformClick();
+                } catch(Exception ex) { failure=ex; d.Close(); }
+            };
+            ManageWindowLayouts(true); if(failure!=null) throw failure;
+            if(hosted.Count!=2 || hosted[0]!=ha || hosted[1]!=hb || strip.Selected!=hb) throw new Exception("Library restore did not preserve order and selection");
+            layoutDialogTest=delegate(Form d) {
+                try {
+                    var controls=AllControls(d).ToList(); var list=(ListBox)controls.First(x=>x.Name=="layouts");
+                    controls.OfType<Button>().First(x=>x.Text=="删除所选").PerformClick();
+                    if(list.Items.Count!=1 || hosted.Count!=2) throw new Exception("Library delete affected live windows");
+                } catch(Exception ex) { failure=ex; } finally { d.Close(); }
+            };
+            ManageWindowLayouts(false); if(failure!=null) throw failure;
+            foreach(var screen in Screen.AllScreens) {
+                Location=new Point(screen.WorkingArea.X+40,screen.WorkingArea.Y+40); Application.DoEvents(); strip.RefreshDpi();
+                int expected=(int)WindowRestore.GetDpiForWindow(strip.Handle);
+                if(Math.Abs(strip.Font.Size-13*expected/96f)>0.1) throw new Exception("Toolbar font did not follow monitor DPI");
+                strip.VerifyToolbar();
+                using(var bitmap=new Bitmap(strip.Width,strip.Height)) { strip.DrawToBitmap(bitmap,new Rectangle(Point.Empty,bitmap.Size)); bitmap.Save(Path.Combine(root,"toolbar-"+expected+"dpi.png")); }
+            }
+            using(var crowded=new TabStrip(new List<Hosted>{ha,hb,ha,hb,ha,hb})) {
+                crowded.Width=1300; crowded.CreateControl(); crowded.RefreshDpi(); crowded.VerifyToolbar();
+                using(var bitmap=new Bitmap(crowded.Width,crowded.Height)) { crowded.DrawToBitmap(bitmap,new Rectangle(Point.Empty,bitmap.Size)); bitmap.Save(Path.Combine(root,"toolbar-crowded.png")); }
+            }
+            DetachForTest(ha); DetachForTest(hb);
+        }
+        layoutDialogTest=null; layoutTestDirectory=null;
+        Console.Error.WriteLine("Library UI: named save, preview, selected restore, order, deletion and per-monitor DPI passed");
+    }
+    void RestoreWindowLayout(SavedWindowLayout layout) {
         try {
             FinishRestores();
             if(restoringWindows.Count>0) { Error("窗口正在移出，请稍后再恢复组合。"); return; }
-            var layout=SavedWindowLayout.Read(PortableConfig.FilePath("window-layout.json"));
             var candidates=hosted.Concat(Discover(false)).ToList();
             var records=candidates.Select(SavedWindow.Capture).ToList();
             var used=new HashSet<int>(); var ordered=new List<Hosted>(); var missing=new List<string>(); Hosted selected=null;
@@ -558,6 +705,7 @@ sealed class MainForm : Form
             Native.SetWindowPos(h.Handle,IntPtr.Zero,0,0,surface.ClientSize.Width,surface.ClientSize.Height,0x0434);
     }
     void Tick() {
+        strip.RefreshDpi();
         FinishRestores();
         if(closing) return;
         if(DateTime.UtcNow>=nextOpenWindowRefresh) { nextOpenWindowRefresh=DateTime.UtcNow.AddSeconds(2); overview.SetOpenWindows(hosted,Discover()); }

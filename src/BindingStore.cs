@@ -71,12 +71,15 @@ sealed class SavedWindowLayout
     public List<SavedWindow> Windows { get; set; }
     public SavedWindowLayout() { Version=1; Selected=-1; Windows=new List<SavedWindow>(); }
     public void Save(string path) {
+        WriteJson(path,this);
+    }
+    internal static void WriteJson(string path,object value) {
         Directory.CreateDirectory(Path.GetDirectoryName(path));
         // Keep the last complete configuration if writing is interrupted.
         string pending=path+".pending";
         try {
             using(var stream=new FileStream(pending,FileMode.Create,FileAccess.Write,FileShare.None)) {
-                byte[] bytes=Encoding.UTF8.GetBytes(new JavaScriptSerializer().Serialize(this));
+                byte[] bytes=Encoding.UTF8.GetBytes(new JavaScriptSerializer().Serialize(value));
                 stream.Write(bytes,0,bytes.Length); stream.Flush(true);
             }
             if(File.Exists(path)) File.Replace(pending,path,null); else File.Move(pending,path);
@@ -85,8 +88,11 @@ sealed class SavedWindowLayout
     public static SavedWindowLayout Read(string path) {
         if(!File.Exists(path)) throw new InvalidOperationException("尚未保存窗口组合，请先点击保存图标。");
         var layout=new JavaScriptSerializer().Deserialize<SavedWindowLayout>(File.ReadAllText(path,Encoding.UTF8));
-        if(layout==null || layout.Version!=1 || layout.Windows==null || layout.Windows.Count==0 || layout.Windows.Any(x=>x==null || String.IsNullOrWhiteSpace(x.App) || x.Title==null) || layout.Selected < -1 || layout.Selected>=layout.Windows.Count) throw new InvalidDataException("窗口组合配置无效，请重新保存。");
+        Validate(layout);
         return layout;
+    }
+    internal static void Validate(SavedWindowLayout layout) {
+        if(layout==null || layout.Version!=1 || layout.Windows==null || layout.Windows.Count==0 || layout.Windows.Any(x=>x==null || String.IsNullOrWhiteSpace(x.App) || x.Title==null) || layout.Selected < -1 || layout.Selected>=layout.Windows.Count) throw new InvalidDataException("窗口组合配置无效，请重新保存。");
     }
     static bool SameApp(SavedWindow a,SavedWindow b) { return String.Equals(a.App,b.App,StringComparison.OrdinalIgnoreCase) && a.ClassName==b.ClassName; }
     static int Unique(List<int> matches) { return matches.Count==1?matches[0]:-1; }
@@ -119,6 +125,55 @@ sealed class SavedWindowLayout
         candidates.Clear(); if(Match(b,candidates,new HashSet<int>(),read.Windows)!=-1) throw new Exception("Missing window matched");
         layout.Windows.Reverse(); layout.Selected=0; layout.Save(path);
         if(Read(path).Windows[0].App!="Code") throw new Exception("Saved layout overwrite failed");
+        WindowLayoutLibrary.Verify(path,layout);
         Console.Error.WriteLine("Window layout: persistence, ordering, mixed apps, reuse, changed titles, ambiguous and missing windows passed");
+    }
+}
+
+sealed class NamedWindowLayout
+{
+    public string Id { get; set; }
+    public string Name { get; set; }
+    public SavedWindowLayout Layout { get; set; }
+    public override string ToString() { return Name+"  ·  "+Layout.Windows.Count+" 个窗口"; }
+}
+
+sealed class WindowLayoutLibrary
+{
+    public int Version { get; set; }
+    public List<NamedWindowLayout> Items { get; set; }
+    public WindowLayoutLibrary() { Version=1; Items=new List<NamedWindowLayout>(); }
+    public static WindowLayoutLibrary Read(string path,string legacy) {
+        if(!File.Exists(path)) {
+            var library=new WindowLayoutLibrary();
+            if(File.Exists(legacy)) { library.Items.Add(new NamedWindowLayout { Id=Guid.NewGuid().ToString("N"),Name="之前保存的组合",Layout=SavedWindowLayout.Read(legacy) }); library.Save(path); }
+            return library;
+        }
+        var result=new JavaScriptSerializer().Deserialize<WindowLayoutLibrary>(File.ReadAllText(path,Encoding.UTF8));
+        if(result==null || result.Version!=1 || result.Items==null || result.Items.Any(x=>x==null || String.IsNullOrWhiteSpace(x.Id) || String.IsNullOrWhiteSpace(x.Name)) || result.Items.Select(x=>x.Id).Distinct().Count()!=result.Items.Count) throw new InvalidDataException("组合列表配置无效，原文件未改动。");
+        foreach(var entry in result.Items) SavedWindowLayout.Validate(entry.Layout);
+        return result;
+    }
+    public void Save(string path) { SavedWindowLayout.WriteJson(path,this); }
+    public NamedWindowLayout Add(string name,SavedWindowLayout layout) {
+        name=(name??"").Trim();
+        if(name.Length==0 || name.Length>80) throw new InvalidOperationException("请输入 1–80 个字符的组合名称。");
+        if(Items.Any(x=>String.Equals(x.Name,name,StringComparison.OrdinalIgnoreCase))) throw new InvalidOperationException("已有同名组合，请使用不同名称。");
+        SavedWindowLayout.Validate(layout);
+        var entry=new NamedWindowLayout { Id=Guid.NewGuid().ToString("N"),Name=name,Layout=layout }; Items.Add(entry); return entry;
+    }
+    public static void Verify(string legacy,SavedWindowLayout layout) {
+        string path=legacy+".library-"+Guid.NewGuid().ToString("N")+".json";
+        var library=Read(path,legacy);
+        if(library.Items.Count!=1 || library.Items[0].Layout.Windows[0].App!=layout.Windows[0].App) throw new Exception("Legacy layout migration failed");
+        var second=library.Add("工作组合",layout); library.Save(path);
+        library=Read(path,legacy); if(library.Items.Count!=2 || library.Items[1].Id!=second.Id) throw new Exception("Named layout persistence failed");
+        bool rejected=false; try { library.Add("工作组合",layout); } catch(InvalidOperationException) { rejected=true; }
+        if(!rejected) throw new Exception("Duplicate layout name accepted");
+        library.Items.RemoveAll(x=>x.Id==second.Id); library.Save(path);
+        if(Read(path,legacy).Items.Count!=1) throw new Exception("Layout deletion failed");
+        library.Items.Clear(); library.Save(path);
+        if(Read(path,legacy).Items.Count!=0) throw new Exception("Deleted legacy layout reimported");
+        Console.Error.WriteLine("Layout library: migration, multiple named layouts, duplicate names and deletion passed");
     }
 }
