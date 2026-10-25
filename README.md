@@ -1,12 +1,16 @@
 # CodeTabs
 
+顶部标签栏采用紧凑布局：左侧四宫格打开 Codex 总览，右侧依次为新建（＋）、拖拽接入（准星）、全部接入 VS Code（叠放窗口带箭头）、移出全部 VS Code（叠放窗口带减号）、保存组合（软盘）、恢复组合（回转箭头）、置顶（图钉）和菜单（三横线）。悬停图标可查看完整操作说明；置顶和拖拽接入启用时显示蓝色底色。标签标题使用 13 像素常规字体，减少 150% 显示缩放下的拥挤。
+
+“移出全部 VS Code”仅恢复 VS Code 为独立窗口，不关闭应用，其他标签保留。“保存组合”将所有已接入应用的窗口列表、当前标签和从左到右的顺序保存到 `config/window-layout.json`，覆盖上次保存；空列表不会覆盖原配置。“恢复组合”按保存顺序接入已打开且能唯一识别的窗口，已有的其他标签排在末尾。没有打开或无法唯一识别的窗口会列出提示，不会自动启动应用或恢复应用内的文档；重新打开应用后可再次恢复组合。配置包含窗口标题，应与其他本地配置一样保持私有。
+
 Windows 桌面窗口标签管理器，附带本地 Codex 会话总览。适合同时打开多个 VS Code 项目时集中切换窗口、查看任务状态。
 
-当前版本：**0.16.10-preview**。Windows 10/11 x64，.NET Framework 4.8。便携运行，无需 Node.js 或 Python；程序暂未签名。
+当前版本：**0.16.11-preview**。Windows 10/11 x64，.NET Framework 4.8。便携运行，无需 Node.js 或 Python；程序暂未签名。
 
 ## 下载与启动
 
-在 [GitHub Releases](https://github.com/HyranX/codetabs/releases) 的 **Assets** 中下载 `CodeTabs-0.16.10-preview-windows-x64-portable.zip` 及同名 `.sha256` 文件。GitHub 自动提供的 Source code ZIP 是源码，不包含编译后的程序。
+在 [GitHub Releases](https://github.com/HyranX/codetabs/releases) 的 **Assets** 中下载 `CodeTabs-0.16.11-preview-windows-x64-portable.zip` 及同名 `.sha256` 文件。GitHub 自动提供的 Source code ZIP 是源码，不包含编译后的程序。
 
 1. 将便携包解压到固定、可写的目录。
 2. 双击 `CodeTabs.exe`。

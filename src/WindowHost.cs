@@ -58,7 +58,7 @@ sealed class TabStrip : Control
     public Action<Hosted> SelectTab;
     public Action<Hosted> SelectForMenu;
     public Action<Point> ShowMenu;
-    public Action AddAll, NewWindow;
+    public Action AddAll, NewWindow, RemoveCode, SaveLayout, RestoreLayout;
     public Action DismissMenu;
     public Action<Hosted> CloseTab, DetachTab;
     public Action<Point> PickWindowAt;
@@ -74,23 +74,25 @@ sealed class TabStrip : Control
     int offset, dragIndex=-1; Point dragStart; bool dragging; int dropIndex=-1;
     Point hoverPoint=new Point(-1,-1);
     const int TabWidth=250;
-    const int HomeWidth=132;
+    const int HomeWidth=40;
     Rectangle TabRect(int i) { return new Rectangle(HomeWidth+i*TabWidth-offset+3,4,TabWidth-6,Height-8); }
     Rectangle ActionRect(int i,bool close) { var r=TabRect(i); return new Rectangle(r.Right-(close?30:60),r.Y+3,27,r.Height-6); }
     public TabStrip(List<Hosted> items) {
-        Items=items; Height=44; Dock=DockStyle.Top; Cursor=Cursors.Hand;
+        Items=items; Height=36; Dock=DockStyle.Top; Cursor=Cursors.Hand;
         SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer|ControlStyles.StandardDoubleClick,true);
     }
-    int ButtonWidth(string text) { return TextRenderer.MeasureText(text,Font).Width+24; }
-    int MenuWidth { get { return Math.Max(92,ButtonWidth("☰ 菜单")); } }
-    int AllWidth { get { return ButtonWidth("全部接入 VS Code"); } }
-    int PickWidth { get { return ButtonWidth("拖拽接入"); } }
-    int PinWidth { get { return ButtonWidth("已置顶"); } }
-    public int MinimumStripWidth { get { return HomeWidth+MenuWidth+PinWidth+AllWidth+PickWidth+36+150; } }
-    int Space { get { return Math.Max(0,Width-MenuWidth-PinWidth-AllWidth-PickWidth-36); } }
+    int MenuWidth { get { return 36; } }
+    int AllWidth { get { return 36; } }
+    int PickWidth { get { return 36; } }
+    int PinWidth { get { return 36; } }
+    public int MinimumStripWidth { get { return HomeWidth+MenuWidth+PinWidth+AllWidth+PickWidth+144+150; } }
+    int Space { get { return Math.Max(0,Width-MenuWidth-PinWidth-AllWidth-PickWidth-144); } }
     Rectangle MenuRect { get { return new Rectangle(Width-MenuWidth,0,MenuWidth,Height); } }
     Rectangle PinRect { get { return new Rectangle(MenuRect.X-PinWidth,0,PinWidth,Height); } }
-    Rectangle AllRect { get { return new Rectangle(PinRect.X-AllWidth,0,AllWidth,Height); } }
+    Rectangle RestoreRect { get { return new Rectangle(PinRect.X-36,0,36,Height); } }
+    Rectangle SaveRect { get { return new Rectangle(RestoreRect.X-36,0,36,Height); } }
+    Rectangle RemoveRect { get { return new Rectangle(SaveRect.X-36,0,36,Height); } }
+    Rectangle AllRect { get { return new Rectangle(RemoveRect.X-AllWidth,0,AllWidth,Height); } }
     Rectangle PickRect { get { return new Rectangle(AllRect.X-PickWidth,0,PickWidth,Height); } }
     Rectangle NewRect { get { return new Rectangle(PickRect.X-36,0,36,Height); } }
     public bool IsPicking { get { return picking; } }
@@ -105,14 +107,14 @@ sealed class TabStrip : Control
     protected override void OnPaint(PaintEventArgs e) {
         e.Graphics.Clear(Color.FromArgb(25,29,37));
         using(var brush=new SolidBrush(OverviewSelected?Color.FromArgb(34,112,204):Color.FromArgb(49,55,66))) e.Graphics.FillRectangle(brush,new Rectangle(3,4,HomeWidth-6,Height-8));
-        TextRenderer.DrawText(e.Graphics,"Codex 总览",Font,new Rectangle(3,4,HomeWidth-6,Height-8),Color.White,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter|TextFormatFlags.SingleLine);
+        DrawToolbarIcon(e.Graphics,new Rectangle(0,0,HomeWidth,Height),"home",Color.White);
         e.Graphics.SetClip(new Rectangle(HomeWidth,0,Math.Max(0,Space-HomeWidth),Height));
         for(int i=0;i<Items.Count;i++) {
             var r=TabRect(i); bool active=Items[i]==Selected;
             using(var brush=new SolidBrush(active?Color.FromArgb(34,112,204):Color.FromArgb(49,55,66))) e.Graphics.FillRectangle(brush,r);
             if(active) using(var brush=new SolidBrush(Color.FromArgb(108,203,255))) e.Graphics.FillRectangle(brush,r.X,r.Bottom-3,r.Width,3);
             string title=Native.Title(Items[i].Handle).Replace(" - Visual Studio Code","");
-            CodexState.Draw(e.Graphics,Items[i],new Rectangle(r.X+9,r.Y+9,17,17));
+            CodexState.Draw(e.Graphics,Items[i],new Rectangle(r.X+9,r.Y+(r.Height-17)/2,17,17));
             TextRenderer.DrawText(e.Graphics,title,Font,new Rectangle(r.X+33,r.Y,r.Width-97,r.Height-2),active?Color.White:Color.FromArgb(198,205,216),TextFormatFlags.VerticalCenter|TextFormatFlags.EndEllipsis|TextFormatFlags.SingleLine);
             DrawAction(e.Graphics,ActionRect(i,false),false);
             DrawAction(e.Graphics,ActionRect(i,true),true);
@@ -120,14 +122,45 @@ sealed class TabStrip : Control
         if(Items.Count==0) TextRenderer.DrawText(e.Graphics,"双击空白处新建 VS Code",Font,new Rectangle(HomeWidth+8,0,Math.Max(0,ViewWidth-8),Height),Color.LightGray,TextFormatFlags.VerticalCenter);
         if(dragging && dropIndex>=0) using(var pen=new Pen(Color.Cyan,3)) e.Graphics.DrawLine(pen,HomeWidth+dropIndex*TabWidth-offset,3,HomeWidth+dropIndex*TabWidth-offset,Height-3);
         e.Graphics.ResetClip();
-        TextRenderer.DrawText(e.Graphics,"＋",Font,NewRect,Color.White,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter);
-        TextRenderer.DrawText(e.Graphics,picking?"拖向目标…":"拖拽接入",Font,PickRect,Color.FromArgb(115,220,255),TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter|TextFormatFlags.SingleLine);
-        TextRenderer.DrawText(e.Graphics,"全部接入 VS Code",Font,AllRect,Color.White,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter|TextFormatFlags.SingleLine);
+        DrawToolbarIcon(e.Graphics,NewRect,"new",Color.White);
+        if(picking) using(var brush=new SolidBrush(Color.FromArgb(21,112,175))) e.Graphics.FillRectangle(brush,Rectangle.Inflate(PickRect,-2,-4));
+        DrawToolbarIcon(e.Graphics,PickRect,"pick",Color.FromArgb(115,220,255));
+        DrawToolbarIcon(e.Graphics,AllRect,"all",Color.White);
+        DrawToolbarIcon(e.Graphics,RemoveRect,"remove",Color.White);
+        DrawToolbarIcon(e.Graphics,SaveRect,"save",Color.White);
+        DrawToolbarIcon(e.Graphics,RestoreRect,"restore",Color.White);
         if(Pinned) using(var brush=new SolidBrush(Color.FromArgb(21,112,175))) e.Graphics.FillRectangle(brush,Rectangle.Inflate(PinRect,-2,-4));
-        TextRenderer.DrawText(e.Graphics,Pinned?"已置顶":"置顶",Font,PinRect,Pinned?Color.FromArgb(130,230,255):Color.White,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter|TextFormatFlags.SingleLine);
+        DrawToolbarIcon(e.Graphics,PinRect,"pin",Pinned?Color.FromArgb(130,230,255):Color.White);
         using(var brush=new SolidBrush(Color.FromArgb(58,65,80))) e.Graphics.FillRectangle(brush,Rectangle.Inflate(MenuRect,-4,-4));
-        TextRenderer.DrawText(e.Graphics,"☰ 菜单",Font,MenuRect,Color.White,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter|TextFormatFlags.SingleLine);
+        DrawToolbarIcon(e.Graphics,MenuRect,"menu",Color.White);
         if(ExternalDragOver) { using(var brush=new SolidBrush(Color.FromArgb(15,105,160))) e.Graphics.FillRectangle(brush,new Rectangle(0,0,Space,Height)); TextRenderer.DrawText(e.Graphics,"松开鼠标，接入此窗口",Font,new Rectangle(8,0,Space-8,Height),Color.White,TextFormatFlags.VerticalCenter|TextFormatFlags.SingleLine); }
+    }
+    void DrawToolbarIcon(Graphics g,Rectangle r,string icon,Color color) {
+        if(r.Contains(hoverPoint)) using(var brush=new SolidBrush(Color.FromArgb(65,78,96))) g.FillRectangle(brush,Rectangle.Inflate(r,-3,-4));
+        int x=r.X+r.Width/2-8,y=r.Y+r.Height/2-8;
+        using(var pen=new Pen(color,1.5f)) {
+            if(icon=="home") { for(int row=0;row<2;row++) for(int col=0;col<2;col++) g.DrawRectangle(pen,x+col*9,y+row*9,6,6); }
+            else if(icon=="new") { g.DrawLine(pen,x+8,y+2,x+8,y+14); g.DrawLine(pen,x+2,y+8,x+14,y+8); }
+            else if(icon=="menu") { for(int row=0;row<3;row++) g.DrawLine(pen,x+1,y+3+row*5,x+15,y+3+row*5); }
+            else if(icon=="remove") { g.DrawRectangle(pen,x+1,y+1,11,9); g.DrawRectangle(pen,x+5,y+5,11,9); g.DrawLine(pen,x+8,y+10,x+13,y+10); }
+            else if(icon=="save") { g.DrawRectangle(pen,x+1,y+1,14,14); g.DrawRectangle(pen,x+4,y+1,7,5); g.DrawRectangle(pen,x+4,y+10,8,5); }
+            else if(icon=="restore") { g.DrawArc(pen,x+2,y+2,12,12,210,290); g.DrawLines(pen,new[]{new Point(x+1,y+1),new Point(x+1,y+7),new Point(x+7,y+7)}); }
+            else if(icon=="pick") { g.DrawEllipse(pen,x+3,y+3,10,10); g.DrawLine(pen,x+8,y,x+8,y+5); g.DrawLine(pen,x+8,y+11,x+8,y+16); g.DrawLine(pen,x,y+8,x+5,y+8); g.DrawLine(pen,x+11,y+8,x+16,y+8); }
+            else if(icon=="all") { g.DrawRectangle(pen,x+1,y+1,11,9); g.DrawRectangle(pen,x+5,y+5,11,9); g.DrawLine(pen,x+8,y+10,x+13,y+10); g.DrawLine(pen,x+11,y+8,x+13,y+10); g.DrawLine(pen,x+11,y+12,x+13,y+10); }
+            else if(icon=="pin") { g.DrawLines(pen,new[]{new Point(x+4,y+1),new Point(x+12,y+1),new Point(x+11,y+7),new Point(x+14,y+10),new Point(x+2,y+10),new Point(x+5,y+7),new Point(x+4,y+1)}); g.DrawLine(pen,x+8,y+10,x+8,y+16); }
+        }
+    }
+    string ToolbarHint(Point point) {
+        if(point.X<HomeWidth) return "Codex 总览";
+        if(NewRect.Contains(point)) return "新建 VS Code 窗口";
+        if(PickRect.Contains(point)) return "拖拽接入：按住并拖向目标窗口，松开接入；Esc 取消";
+        if(AllRect.Contains(point)) return "全部接入 VS Code";
+        if(RemoveRect.Contains(point)) return "移出全部 VS Code，恢复独立窗口（不关闭应用）";
+        if(SaveRect.Contains(point)) return "保存当前窗口组合及标签顺序（覆盖上次保存）";
+        if(RestoreRect.Contains(point)) return "恢复已保存的窗口组合及顺序";
+        if(PinRect.Contains(point)) return Pinned?"取消置顶":"窗口置顶";
+        if(MenuRect.Contains(point)) return "菜单：更多操作与设置";
+        return "";
     }
     void DrawAction(Graphics g,Rectangle r,bool close) {
         if(r.Contains(hoverPoint)) using(var brush=new SolidBrush(close?Color.FromArgb(195,57,67):Color.FromArgb(42,146,203))) g.FillRectangle(brush,r);
@@ -145,6 +178,9 @@ sealed class TabStrip : Control
         if(MenuRect.Contains(e.Location)) { ShowMenu(new Point(Width-240,Height)); return; }
         if(DismissMenu!=null) DismissMenu();
         if(PinRect.Contains(e.Location)) { TogglePin(); return; }
+        if(RemoveRect.Contains(e.Location)) { RemoveCode(); return; }
+        if(SaveRect.Contains(e.Location)) { SaveLayout(); return; }
+        if(RestoreRect.Contains(e.Location)) { RestoreLayout(); return; }
         if(AllRect.Contains(e.Location)) { AddAll(); return; }
         if(PickRect.Contains(e.Location)) { StartPick(); return; }
         if(NewRect.Contains(e.Location)) { NewWindow(); return; }
@@ -157,7 +193,7 @@ sealed class TabStrip : Control
     }
     protected override void OnMouseMove(MouseEventArgs e) {
         base.OnMouseMove(e); hoverPoint=e.Location; Invalidate();
-        int hover=Hit(e.Location); string hint=hover<0?"":ActionRect(hover,true).Contains(e.Location)?"关闭此应用窗口（保留应用自身确认）":ActionRect(hover,false).Contains(e.Location)?"移出此标签，恢复为独立窗口（不关闭）":Native.Title(Items[hover].Handle)+(Items[hover].IsVSCode?"\nCodex："+CodexState.Description(Items[hover]):"\n"+Items[hover].ApplicationName); if(tip.GetToolTip(this)!=hint) tip.SetToolTip(this,hint);
+        int hover=Hit(e.Location); string hint=hover<0?ToolbarHint(e.Location):ActionRect(hover,true).Contains(e.Location)?"关闭此应用窗口（保留应用自身确认）":ActionRect(hover,false).Contains(e.Location)?"移出此标签，恢复为独立窗口（不关闭）":Native.Title(Items[hover].Handle)+(Items[hover].IsVSCode?"\nCodex："+CodexState.Description(Items[hover]):"\n"+Items[hover].ApplicationName); if(tip.GetToolTip(this)!=hint) tip.SetToolTip(this,hint);
         if(dragIndex<0 || e.Button!=MouseButtons.Left) return;
         if(Math.Abs(e.X-dragStart.X)>SystemInformation.DragSize.Width) dragging=true;
         if(!dragging) return;
@@ -184,7 +220,12 @@ sealed class TabStrip : Control
         if(Items[1]!=first || Selected!=first) throw new Exception("Drag ordering failed");
     }
     public void VerifyToolbar() {
-        if(AllRect.Width<TextRenderer.MeasureText("全部接入 VS Code",Font).Width+16 || AllRect.IntersectsWith(PickRect)||AllRect.IntersectsWith(MenuRect)) throw new Exception("Toolbar label clipped");
+        var buttons=new[]{NewRect,PickRect,AllRect,RemoveRect,SaveRect,RestoreRect,PinRect,MenuRect};
+        for(int i=0;i<buttons.Length;i++) {
+            var r=buttons[i];
+            if(r.Width<32 || r.Height<28 || r.Left<HomeWidth || r.Right>Width || String.IsNullOrEmpty(ToolbarHint(new Point(r.X+r.Width/2,r.Y+r.Height/2)))) throw new Exception("Toolbar icon clipped or missing hint");
+            if(i>0 && buttons[i-1].IntersectsWith(r)) throw new Exception("Toolbar buttons overlap");
+        }
     }
     public void ClickActionForTest(Hosted item,bool close) {
         Selected=item; Reveal(); var r=ActionRect(Items.IndexOf(item),close);
@@ -241,19 +282,23 @@ sealed class MainForm : Form
         codex.TaskCompleted=overview.TaskCompleted=delegate(Hosted project,string token) {
             if(!closing&&notifications!=null) notifications.Completed(project,token,overview.DisplayName(project));
         };
-        strip=new TabStrip(hosted) { Font=new Font("Microsoft YaHei UI",10,FontStyle.Bold) };
-        MinimumSize=new Size(strip.MinimumStripWidth+20,400);
+        strip=new TabStrip(hosted) { Font=new Font("Microsoft YaHei UI",13,FontStyle.Regular,GraphicsUnit.Pixel) };
+        MinimumSize=new Size(Math.Max(640,strip.MinimumStripWidth+20),400);
         strip.SelectTab=Select; strip.ShowMenu=delegate(Point point) { menu.Close(); menu.Show(strip,point); }; strip.DismissMenu=delegate { menu.Close(); }; strip.AddAll=AttachAll; strip.NewWindow=NewWindow; strip.CloseTab=CloseTab; strip.DetachTab=Detach;
         strip.PickWindowAt=PickAt; strip.Refocus=QueueFocus;
+        strip.RemoveCode=RemoveAllCode; strip.SaveLayout=SaveWindowLayout; strip.RestoreLayout=RestoreWindowLayout;
         strip.PickingChanged=UpdateKeyboardHook;
         strip.SelectForMenu=delegate(Hosted h) { if(strip.Selected!=h) Select(h,false); };
         strip.ShowOverview=delegate { Select(null); };
         overview.OpenProject=OpenOverviewProject;
         strip.TogglePin=delegate { TopMost=!TopMost; strip.Pinned=TopMost; UpdateCompatible(true); strip.Invalidate(); };
-        menu.AutoClose=true; menu.Font=new Font("Microsoft YaHei UI",10); menu.Padding=new Padding(5);
+        menu.AutoClose=true; menu.Font=new Font("Microsoft YaHei UI",9); menu.Padding=new Padding(4);
         menu.Items.Add("新建 VS Code 窗口",null,delegate { NewWindow(); });
         menu.Items.Add("接入全部 VS Code 窗口",null,delegate { AttachAll(); });
         menu.Items.Add("选择应用窗口接入…",null,delegate { Pick(); });
+        menu.Items.Add("移出全部 VS Code（不关闭）",null,delegate { RemoveAllCode(); });
+        menu.Items.Add("保存当前窗口组合及顺序",null,delegate { SaveWindowLayout(); });
+        menu.Items.Add("恢复已保存的窗口组合",null,delegate { RestoreWindowLayout(); });
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("移出当前标签",null,delegate { if(strip.Selected!=null) Detach(strip.Selected); });
         menu.Items.Add("关闭当前应用窗口",null,delegate { if(strip.Selected!=null) CloseTab(strip.Selected); });
@@ -321,6 +366,40 @@ sealed class MainForm : Form
         },IntPtr.Zero); return result;
     }
     void AttachAll() { var windows=Discover(); if(windows.Count==0) { Error("没有找到新的 VS Code 窗口。"); return; } foreach(var h in windows) Attach(h); }
+    void RemoveAllCode() {
+        foreach(var h in hosted.Where(x=>x.IsVSCode).ToArray()) Detach(h);
+    }
+    void SaveWindowLayout() {
+        try {
+            var windows=hosted.Where(x=>Native.IsWindow(x.Handle)).ToList();
+            if(windows.Count==0) { Error("当前没有已组合的窗口，原有配置未改动。"); return; }
+            var layout=new SavedWindowLayout { Windows=windows.Select(SavedWindow.Capture).ToList(), Selected=windows.IndexOf(strip.Selected) };
+            layout.Save(PortableConfig.FilePath("window-layout.json"));
+            Error("已保存 "+windows.Count+" 个窗口及当前顺序。下次点击“恢复窗口组合”图标即可重新接入已打开的窗口。");
+        } catch(Exception ex) { Error("保存窗口组合失败："+ex.Message); }
+    }
+    void RestoreWindowLayout() {
+        try {
+            FinishRestores();
+            if(restoringWindows.Count>0) { Error("窗口正在移出，请稍后再恢复组合。"); return; }
+            var layout=SavedWindowLayout.Read(PortableConfig.FilePath("window-layout.json"));
+            var candidates=hosted.Concat(Discover(false)).ToList();
+            var records=candidates.Select(SavedWindow.Capture).ToList();
+            var used=new HashSet<int>(); var ordered=new List<Hosted>(); var missing=new List<string>(); Hosted selected=null;
+            for(int i=0;i<layout.Windows.Count;i++) {
+                int match=SavedWindowLayout.Match(layout.Windows[i],records,used,layout.Windows);
+                if(match<0) { missing.Add(layout.Windows[i].Title+"（"+layout.Windows[i].App+"）"); continue; }
+                used.Add(match); var h=candidates[match];
+                if(!hosted.Contains(h)) Attach(h);
+                if(!hosted.Contains(h)) { missing.Add(layout.Windows[i].Title+"（接入失败）"); continue; }
+                ordered.Add(h); if(i==layout.Selected) selected=h;
+            }
+            var remaining=hosted.Where(x=>!ordered.Contains(x)).ToList();
+            hosted.Clear(); hosted.AddRange(ordered); hosted.AddRange(remaining);
+            Select(layout.Selected<0?null:selected??ordered.FirstOrDefault()??hosted.FirstOrDefault()); strip.Reveal();
+            if(missing.Count>0) Error("已恢复 "+ordered.Count+" 个窗口。以下窗口未打开、标题已改变或存在多个匹配，请打开或手动接入后重试：\n\n"+String.Join("\n",missing));
+        } catch(Exception ex) { Error("恢复窗口组合失败："+ex.Message); }
+    }
     void Pick() {
         dialogOpen=true;
         try { using(var d=new Form { Text="选择应用窗口接入", Size=new Size(850,460), StartPosition=FormStartPosition.CenterParent,Font=Font }) {
@@ -808,6 +887,14 @@ sealed class MainForm : Form
             preventClose=false; strip.ClickActionForTest(ha,true); Application.DoEvents(); Tick(); if(Native.IsWindow(ha.Handle)||hosted.Contains(ha)) throw new Exception("Close failed");
             strip.ClickActionForTest(hb,false); Application.DoEvents(); if(!Native.IsWindow(b.Handle)||hosted.Contains(hb)||Native.GetParent(b.Handle)!=IntPtr.Zero||Native.GetStyle(b.Handle,-16)!=hb.Style) throw new Exception("Detach button failed");
         }
+        using(var code=new Form { Text="Remove VS Code fixture" }) using(var other=new Form { Text="Keep other application fixture" }) {
+            code.Show(); other.Show();
+            var hc=new Hosted { Handle=code.Handle,IsVSCode=true,ApplicationName="Code" };
+            var ho=new Hosted { Handle=other.Handle,ApplicationName="Other" };
+            Attach(hc); Attach(ho); RemoveAllCode(); WaitForRestoresForTest();
+            if(hosted.Contains(hc)||!hosted.Contains(ho)||!Native.IsWindow(code.Handle)||Native.GetParent(code.Handle)!=IntPtr.Zero) throw new Exception("Remove all VS Code affected other applications or closed a window");
+            DetachForTest(ho);
+        }
     }
     void VerifyGestures(Hosted a,Hosted b) {
         Select(a);
@@ -860,8 +947,15 @@ sealed class MainForm : Form
                 VerifyPlacementRestore(handle);
                 VerifyDelayedResizeRestore(handle);
                 VerifyCloseRestore(handle);
-                Native.ShowWindow(handle,5); Native.SetWindowPos(handle,IntPtr.Zero,100,100,640,480,0x0040); Application.DoEvents();
-                PickAt(new Point(200,200)); Application.DoEvents();
+                // Previous restore cases can leave the fixture maximized on another screen.
+                // Restore it, place it inside the work area, then verify the actual hit target.
+                var pickArea=Screen.PrimaryScreen.WorkingArea;
+                Native.ShowWindow(handle,9); Native.SetWindowPos(handle,IntPtr.Zero,pickArea.Left+40,pickArea.Top+40,640,480,0x0040);
+                var pickPoint=new Point(pickArea.Left+140,pickArea.Top+140);
+                var pickWait=Stopwatch.StartNew();
+                while(HostApi.GetAncestor(HostApi.WindowFromPoint(pickPoint),2)!=handle && pickWait.ElapsedMilliseconds<2000) { Application.DoEvents(); System.Threading.Thread.Sleep(10); }
+                if(HostApi.GetAncestor(HostApi.WindowFromPoint(pickPoint),2)!=handle) throw new Exception("Drag picker fixture is obscured at the test point");
+                PickAt(pickPoint); Application.DoEvents();
                 if(!hosted.Exists(item=>item.Handle==handle)) throw new Exception("Drag picker failed");
                 DetachForTest(hosted.Find(item=>item.Handle==handle));
             } finally { process.CloseMainWindow(); process.WaitForExit(5000); }

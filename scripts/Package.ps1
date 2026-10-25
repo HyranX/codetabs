@@ -49,10 +49,10 @@ $startInfo.WorkingDirectory = $extracted
 $startInfo.UseShellExecute = $false
 $startInfo.CreateNoWindow = $true
 $startInfo.RedirectStandardError = $true
-$testModes = if ($SkipUiTests) { @('--notification-test') } else { @('--startup-test','--smoke-test','--notification-test') }
-if ($SkipUiTests) { Write-Output 'CI mode: desktop startup/smoke tests explicitly skipped; notification tests still run.' }
+$testModes = if ($SkipUiTests) { @('--notification-test','--window-layout-test') } else { @('--startup-test','--smoke-test','--notification-test','--window-layout-test') }
+if ($SkipUiTests) { Write-Output 'CI mode: desktop startup/smoke tests explicitly skipped; notification and window layout tests still run.' }
 foreach ($testMode in $testModes) {
-    $startInfo.Arguments = if ($testMode -eq '--notification-test') { '--notification-test "' + (Join-Path $scratchRoot 'notification-fixture.jsonl') + '"' } else { $testMode }
+    $startInfo.Arguments = if ($testMode -eq '--notification-test') { '--notification-test "' + (Join-Path $scratchRoot 'notification-fixture.jsonl') + '"' } elseif ($testMode -eq '--window-layout-test') { '--window-layout-test "' + (Join-Path $scratchRoot 'window-layout-fixture.json') + '"' } else { $testMode }
     $process = [Diagnostics.Process]::Start($startInfo)
     $testTimeout = if ($testMode -eq '--smoke-test') { 90000 } else { 35000 }
     if (-not $process.WaitForExit($testTimeout)) { throw "Extracted executable $testMode timed out" }
