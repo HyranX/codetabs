@@ -22,6 +22,21 @@ sealed class Overview : UserControl
         public string EmptyMessage="暂无可显示的项目。可刷新、添加目录，或勾选显示已隐藏。";
         int columns=1,cardWidth=360,cardHeight=250,gap=16;
         float scale=1;
+        int zoom=90,dpi=96;
+        Font bodyFont;
+        Font CardFont { get { return bodyFont??Font; } }
+        public int Zoom { get { return zoom; } }
+        public void SetZoom(int percent) { zoom=Math.Max(60,Math.Min(150,percent)); UpdateMetrics(); }
+        public void RefreshDpi() { int current=IsHandleCreated?(int)WindowRestore.GetDpiForWindow(Handle):96; if(current>0 && current!=dpi) { dpi=current; UpdateMetrics(); } }
+        void UpdateMetrics() {
+            int anchor=Math.Max(0,(-AutoScrollPosition.Y-gap)/(cardHeight+gap))*columns;
+            if(bodyFont!=null) bodyFont.Dispose(); if(titleFont!=null) titleFont.Dispose();
+            bodyFont=new Font(Font.FontFamily,Font.SizeInPoints*dpi/72f*zoom/100f,FontStyle.Regular,GraphicsUnit.Pixel);
+            titleFont=new Font(Font.FontFamily,(Font.SizeInPoints+2f)*dpi/72f*zoom/100f,FontStyle.Bold,GraphicsUnit.Pixel);
+            scale=Math.Max(0.5f,CardFont.Height/17f); Arrange();
+            if(Entries.Count>0) AutoScrollPosition=new Point(0,(Math.Min(anchor,Entries.Count-1)/columns)*(cardHeight+gap));
+            Invalidate();
+        }
         public bool Light;
         Color Theme(Color dark,Color light) { return Light?light:dark; }
         Font titleFont;
@@ -37,17 +52,17 @@ sealed class Overview : UserControl
         }
         protected override void OnFontChanged(EventArgs e) {
             base.OnFontChanged(e);
-            if(titleFont!=null) titleFont.Dispose();
-            titleFont=new Font(Font.FontFamily,Font.Size+3f,FontStyle.Bold);
-            scale=Math.Max(1,Font.Height/17f); Arrange();
+            UpdateMetrics();
         }
         protected override void OnResize(EventArgs e) { base.OnResize(e); Arrange(); }
         void Arrange() {
             // Constant-time arithmetic, independent of the total number of cards.
-            gap=S(12); cardHeight=S(208);
+            gap=S(10); cardHeight=S(192);
             int available=Math.Max(S(180),Width-SystemInformation.VerticalScrollBarWidth-2*gap);
-            columns=Math.Max(1,(available+gap)/(S(300)+gap));
-            cardWidth=Math.Max(S(180),(available-(columns-1)*gap)/columns);
+            int badges=new[]{"独立打开","↑ 已置顶","已隐藏"}.Sum(t=>TextRenderer.MeasureText(t,CardFont,Size.Empty,TextFormatFlags.NoPadding|TextFormatFlags.SingleLine).Width)+S(86);
+            int minimum=Math.Max(S(280),badges);
+            columns=Math.Max(1,(available+gap)/(minimum+gap));
+            cardWidth=Math.Max(S(180),Math.Min(Math.Max(minimum,S(340)),(available-(columns-1)*gap)/columns));
             int rows=(Entries.Count+columns-1)/columns;
             var extent=new Size(0,rows==0?0:gap+rows*(cardHeight+gap));
             if(AutoScrollMinSize!=extent) AutoScrollMinSize=extent;
@@ -127,19 +142,19 @@ sealed class Overview : UserControl
             Color background=primary?Color.FromArgb(38,118,183):active?Theme(Color.FromArgb(204,215,228),Color.FromArgb(62,76,95)):Theme(Color.FromArgb(46,57,72),Color.FromArgb(230,235,242));
             Color foreground=primary?Color.White:active?Theme(Color.FromArgb(25,36,50),Color.White):Theme(Color.FromArgb(211,224,238),Color.FromArgb(44,57,74));
             using(var brush=new SolidBrush(background)) g.FillRectangle(brush,r);
-            TextRenderer.DrawText(g,text,Font,r,foreground,background,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter|TextFormatFlags.SingleLine|TextFormatFlags.NoPadding|TextFormatFlags.NoPrefix);
+            TextRenderer.DrawText(g,text,CardFont,r,foreground,background,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter|TextFormatFlags.SingleLine|TextFormatFlags.NoPadding|TextFormatFlags.NoPrefix);
         }
         int DrawBadge(Graphics g,string text,int x,int y,Color background,Color foreground) {
-            int width=TextRenderer.MeasureText(text,Font,Size.Empty,TextFormatFlags.NoPadding|TextFormatFlags.SingleLine).Width+S(14);
+            int width=TextRenderer.MeasureText(text,CardFont,Size.Empty,TextFormatFlags.NoPadding|TextFormatFlags.SingleLine).Width+S(14);
             var bounds=new Rectangle(x,y,width,S(21));
             using(var brush=new SolidBrush(background)) g.FillRectangle(brush,bounds);
-            using(var brush=new SolidBrush(foreground)) using(var format=new StringFormat { Alignment=StringAlignment.Center,LineAlignment=StringAlignment.Center }) g.DrawString(text,Font,brush,bounds,format);
+            using(var brush=new SolidBrush(foreground)) using(var format=new StringFormat { Alignment=StringAlignment.Center,LineAlignment=StringAlignment.Center }) g.DrawString(text,CardFont,brush,bounds,format);
             return x+width+S(6);
         }
         protected override void OnPaint(PaintEventArgs e) {
             base.OnPaint(e); LastPainted=0;
             if(Entries.Count==0) {
-                DrawText(e.Graphics,EmptyMessage,Font,new Rectangle(gap,gap,Math.Max(10,ClientSize.Width-2*gap),S(60)),Theme(Color.Silver,Color.FromArgb(85,97,113)),TextFormatFlags.WordBreak); return;
+                DrawText(e.Graphics,EmptyMessage,CardFont,new Rectangle(gap,gap,Math.Max(10,ClientSize.Width-2*gap),S(60)),Theme(Color.Silver,Color.FromArgb(85,97,113)),TextFormatFlags.WordBreak); return;
             }
             int first=Math.Max(0,(-AutoScrollPosition.Y-gap)/(cardHeight+gap))*columns;
             int last=Math.Min(Entries.Count,first+((ClientSize.Height/(cardHeight+gap))+3)*columns);
@@ -155,17 +170,17 @@ sealed class Overview : UserControl
             using(var brush=new SolidBrush(Theme(Color.FromArgb(30,39,52),Color.White))) g.FillRectangle(brush,r);
             using(var pen=new Pen(selected?Theme(Color.FromArgb(82,180,255),Color.FromArgb(0,104,181)):Theme(Color.FromArgb(57,70,87),Color.FromArgb(210,217,226)),selected?S(2):1)) g.DrawRectangle(pen,r.X+1,r.Y+1,r.Width-3,r.Height-3);
             int x=r.X+S(16),w=r.Width-S(32);
-            int badgeX=DrawBadge(g,entry.Managed?"CodeTabs 管理中":entry.Opened?"独立窗口已打开":"未打开",x,r.Y+S(10),entry.Managed?Theme(Color.FromArgb(30,83,125),Color.FromArgb(219,238,255)):Theme(Color.FromArgb(44,55,70),Color.FromArgb(237,240,244)),entry.Managed?Theme(Color.FromArgb(161,216,255),Color.FromArgb(0,84,145)):Theme(Color.FromArgb(181,195,211),Color.FromArgb(87,101,119)));
+            int badgeX=DrawBadge(g,entry.Managed?"已接入":entry.Opened?"独立打开":"未打开",x,r.Y+S(10),entry.Managed?Theme(Color.FromArgb(30,83,125),Color.FromArgb(219,238,255)):Theme(Color.FromArgb(44,55,70),Color.FromArgb(237,240,244)),entry.Managed?Theme(Color.FromArgb(161,216,255),Color.FromArgb(0,84,145)):Theme(Color.FromArgb(181,195,211),Color.FromArgb(87,101,119)));
             if(entry.Pinned) badgeX=DrawBadge(g,"↑ 已置顶",badgeX,r.Y+S(10),Theme(Color.FromArgb(204,215,228),Color.FromArgb(62,76,95)),Theme(Color.FromArgb(25,36,50),Color.White));
             if(entry.Hidden) DrawBadge(g,"已隐藏",badgeX,r.Y+S(10),Theme(Color.FromArgb(44,55,70),Color.FromArgb(237,240,244)),Theme(Color.FromArgb(181,195,211),Color.FromArgb(87,101,119)));
-            DrawText(g,entry.Title,titleFont??Font,new Rectangle(x,r.Y+S(38),w,S(44)),Theme(Color.White,Color.FromArgb(25,36,50)),TextFormatFlags.WordBreak|TextFormatFlags.EndEllipsis);
+            DrawText(g,entry.Title,titleFont??CardFont,new Rectangle(x,r.Y+S(36),w,S(44)),Theme(Color.White,Color.FromArgb(25,36,50)),TextFormatFlags.WordBreak|TextFormatFlags.EndEllipsis);
             Color state=entry.Status=="running"?Theme(Color.FromArgb(103,215,219),Color.FromArgb(0,112,117)):entry.Status=="completed"?Theme(Color.FromArgb(126,218,163),Color.FromArgb(31,117,65)):entry.Status=="interrupted"?Theme(Color.FromArgb(239,182,119),Color.FromArgb(151,76,24)):Theme(Color.FromArgb(171,184,201),Color.FromArgb(85,97,113));
             string label=entry.Status=="running"?"● 正在执行":entry.Status=="completed"?"✓ 已完成":entry.Status=="idle"?"○ 空闲":entry.Status=="interrupted"?"■ 已中断":"○ 状态未知";
             if(entry.Status=="completed") label+=entry.Viewed?" · 已查看":" · 待查看";
-            DrawText(g,label,Font,new Rectangle(x,r.Y+S(86),w,S(20)),state,TextFormatFlags.SingleLine|TextFormatFlags.EndEllipsis);
-            DrawText(g,entry.Path??"尚未设置目录",Font,new Rectangle(x,r.Y+S(110),w,S(34)),Theme(Color.FromArgb(157,177,198),Color.FromArgb(81,100,123)),TextFormatFlags.WordBreak|TextFormatFlags.EndEllipsis);
-            if(entry.Missing) DrawText(g,"! 目录不存在或不可访问",Font,new Rectangle(x,r.Y+S(146),w,S(18)),Theme(Color.FromArgb(239,169,112),Color.FromArgb(151,76,24)),TextFormatFlags.SingleLine|TextFormatFlags.EndEllipsis);
-            else if(entry.ChangedDirectory) DrawText(g,"自定义目录",Font,new Rectangle(x,r.Y+S(146),w,S(18)),Theme(Color.FromArgb(141,160,181),Color.FromArgb(100,112,128)),TextFormatFlags.SingleLine);
+            DrawText(g,label,CardFont,new Rectangle(x,r.Y+S(84),w,S(20)),state,TextFormatFlags.SingleLine|TextFormatFlags.EndEllipsis);
+            DrawText(g,entry.Path??"尚未设置目录",CardFont,new Rectangle(x,r.Y+S(108),w,S(22)),Theme(Color.FromArgb(157,177,198),Color.FromArgb(81,100,123)),TextFormatFlags.SingleLine|TextFormatFlags.EndEllipsis);
+            if(entry.Missing) DrawText(g,"! 目录不存在或不可访问",CardFont,new Rectangle(x,r.Y+S(132),w,S(18)),Theme(Color.FromArgb(239,169,112),Color.FromArgb(151,76,24)),TextFormatFlags.SingleLine|TextFormatFlags.EndEllipsis);
+            else if(entry.ChangedDirectory) DrawText(g,"自定义目录",CardFont,new Rectangle(x,r.Y+S(132),w,S(18)),Theme(Color.FromArgb(141,160,181),Color.FromArgb(100,112,128)),TextFormatFlags.SingleLine);
             DrawButton(g,entry.Opened?"切换":"打开",OpenBounds(r),false,true);
             DrawButton(g,"重命名",RenameBounds(r));
             DrawButton(g,entry.Pinned?"已置顶":"置顶",PinBounds(r),entry.Pinned);
@@ -178,8 +193,8 @@ sealed class Overview : UserControl
         }
         public bool ButtonsFit() {
             Rectangle r=BoundsFor(0);
-            int badges=new[]{"CodeTabs 管理中","↑ 已置顶","已隐藏"}.Sum(t=>TextRenderer.MeasureText(t,Font,Size.Empty,TextFormatFlags.NoPadding|TextFormatFlags.SingleLine).Width+S(14))+2*S(6);
-            return badges<=r.Width-S(32)&&RenameBounds(r).Left>=OpenBounds(r).Right&&PinBounds(r).Left>=RenameBounds(r).Right&&HideBounds(r).Left>=PinBounds(r).Right&&MoreBounds(r).Left>=HideBounds(r).Right&&TextRenderer.MeasureText("已置顶",Font).Width<PinBounds(r).Width&&TextRenderer.MeasureText("隐藏",Font).Width<HideBounds(r).Width;
+            int badges=new[]{"独立打开","↑ 已置顶","已隐藏"}.Sum(t=>TextRenderer.MeasureText(t,CardFont,Size.Empty,TextFormatFlags.NoPadding|TextFormatFlags.SingleLine).Width+S(14))+2*S(6);
+            return badges<=r.Width-S(32)&&RenameBounds(r).Left>=OpenBounds(r).Right&&PinBounds(r).Left>=RenameBounds(r).Right&&HideBounds(r).Left>=PinBounds(r).Right&&MoreBounds(r).Left>=HideBounds(r).Right&&TextRenderer.MeasureText("已置顶",CardFont).Width<PinBounds(r).Width&&TextRenderer.MeasureText("隐藏",CardFont).Width<HideBounds(r).Width;
         }
         public void TestPinClick(int index) {
             var r=PinBounds(BoundsFor(index)); var e=new MouseEventArgs(MouseButtons.Left,1,r.X+r.Width/2,r.Y+r.Height/2,0);
@@ -189,7 +204,7 @@ sealed class Overview : UserControl
             var r=ActionBounds(BoundsFor(index),action); var e=new MouseEventArgs(MouseButtons.Left,1,r.X+r.Width/2,r.Y+r.Height/2,0);
             OnMouseClick(e); OnMouseDoubleClick(e);
         }
-        protected override void Dispose(bool disposing) { if(disposing) { tip.Dispose(); actions.Dispose(); if(titleFont!=null) titleFont.Dispose(); } base.Dispose(disposing); }
+        protected override void Dispose(bool disposing) { if(disposing) { tip.Dispose(); actions.Dispose(); if(titleFont!=null) titleFont.Dispose(); if(bodyFont!=null) bodyFont.Dispose(); } base.Dispose(disposing); }
     }
     sealed class Snapshot {
         public int Revision;
@@ -204,6 +219,9 @@ sealed class Overview : UserControl
     readonly ComboBox viewMode=new ComboBox { DropDownStyle=ComboBoxStyle.DropDownList,Width=240,ForeColor=Color.Black,BackColor=Color.White,Margin=new Padding(12,7,0,0) };
     readonly TextBox search=new TextBox { Dock=DockStyle.Fill };
     readonly ComboBox themeMode=new ComboBox { DropDownStyle=ComboBoxStyle.DropDownList,Width=110,Margin=new Padding(12,7,0,0) };
+    readonly Button zoomOut=new Button(),zoomValue=new Button(),zoomIn=new Button();
+    readonly ContextMenuStrip zoomMenu=new ContextMenuStrip();
+    string zoomMonitor;
     sealed class WindowCatalogue {
         public readonly HashSet<string> Sessions=new HashSet<string>(StringComparer.OrdinalIgnoreCase),Names=new HashSet<string>(StringComparer.OrdinalIgnoreCase),Directories=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         public readonly List<string> RemoteTitles=new List<string>();
@@ -301,6 +319,16 @@ sealed class Overview : UserControl
         clear.Click+=delegate { search.Clear(); search.Focus(); };
         searchBar.Controls.Add(themeMode); searchBar.Controls.Add(searchLabel); searchBar.Controls.Add(search); searchBar.Controls.Add(clear);
         toolbar.Controls.Add(searchBar);
+        var zoomBar=new FlowLayoutPanel { AutoSize=true,AutoSizeMode=AutoSizeMode.GrowAndShrink,WrapContents=false,Margin=new Padding(8,2,4,2) };
+        zoomOut.Text="−"; zoomValue.Text="90% ▾"; zoomIn.Text="＋";
+        zoomOut.AccessibleName="缩小项目卡片"; zoomValue.AccessibleName="项目卡片缩放比例"; zoomIn.AccessibleName="放大项目卡片";
+        foreach(var button in new[]{zoomOut,zoomValue,zoomIn}) { button.AutoSize=true; button.AutoSizeMode=AutoSizeMode.GrowAndShrink; button.FlatStyle=FlatStyle.Flat; button.Padding=new Padding(6,4,6,4); button.Margin=new Padding(1,0,1,0); zoomBar.Controls.Add(button); }
+        zoomOut.Click+=delegate { SetCardZoom(cards.Zoom-10,true); }; zoomIn.Click+=delegate { SetCardZoom(cards.Zoom+10,true); };
+        foreach(int percent in new[]{60,75,90,100,110,125,150}) {
+            int value=percent; zoomMenu.Items.Add(percent+"%"+(percent==90?"（默认）":""),null,delegate { SetCardZoom(value,true); });
+        }
+        zoomValue.Click+=delegate { for(int i=0;i<zoomMenu.Items.Count;i++) ((ToolStripMenuItem)zoomMenu.Items[i]).Checked=zoomMenu.Items[i].Text.StartsWith(cards.Zoom+"%"); zoomMenu.Show(zoomValue,new Point(0,zoomValue.Height)); };
+        toolbar.Controls.Add(zoomBar);
         searchInfo.Dock=DockStyle.Bottom; searchInfo.Height=24; searchInfo.Padding=new Padding(18,2,0,0); searchInfo.ForeColor=Color.LightSteelBlue;
         cards.Dock=DockStyle.Fill; cards.Font=Font;
         cards.OpenEntry=e=> { if(OpenProject!=null) OpenProject(e.Project); };
@@ -311,6 +339,22 @@ sealed class Overview : UserControl
         Controls.Add(cards); Controls.Add(searchInfo); Controls.Add(toolbar); Controls.Add(summary); Controls.Add(note);
         try { viewed=seen.Read(); hidden=hiddenStore.Read(); pinned=pinStore.Read(); titles=titleStore.Read(); } catch(Exception) { discoveryError="本地记录读取失败"; }
         ApplyTheme(themeMode.SelectedIndex==1);
+        SetCardZoom(90,false);
+    }
+    void SetCardZoom(int percent,bool save) {
+        if(save) { zoomMonitor=Screen.FromControl(this).DeviceName; cards.RefreshDpi(); }
+        cards.SetZoom(percent); zoomValue.Text=cards.Zoom+"% ▾"; zoomOut.Enabled=cards.Zoom>60; zoomIn.Enabled=cards.Zoom<150;
+        if(save) try { viewStore.Save("zoom:"+(zoomMonitor??Screen.FromControl(this).DeviceName),cards.Zoom.ToString(System.Globalization.CultureInfo.InvariantCulture)); }
+        catch(Exception ex) { MessageBox.Show(this,"卡片缩放设置保存失败："+ex.Message); }
+    }
+    void RefreshCardScale() {
+        if(!IsHandleCreated) return;
+        string current=Screen.FromControl(this).DeviceName;
+        cards.RefreshDpi();
+        if(current==zoomMonitor) return;
+        zoomMonitor=current; int percent=90;
+        try { string saved; int parsed; if(viewStore.Read().TryGetValue("zoom:"+current,out saved) && Int32.TryParse(saved,out parsed) && parsed>=60 && parsed<=150) percent=parsed; } catch(Exception) {}
+        SetCardZoom(percent,false);
     }
     void ApplyTheme(bool light) {
         Color background=light?Color.FromArgb(243,245,248):Color.FromArgb(22,27,35),foreground=light?Color.FromArgb(38,49,64):Color.FromArgb(220,229,240);
@@ -325,6 +369,9 @@ sealed class Overview : UserControl
     }
     protected override bool ProcessCmdKey(ref Message msg,Keys keyData) {
         if(keyData==(Keys.Control|Keys.F)) { search.Focus(); search.SelectAll(); return true; }
+        if(keyData==(Keys.Control|Keys.Oemplus)||keyData==(Keys.Control|Keys.Add)) { SetCardZoom(cards.Zoom+10,true); return true; }
+        if(keyData==(Keys.Control|Keys.OemMinus)||keyData==(Keys.Control|Keys.Subtract)) { SetCardZoom(cards.Zoom-10,true); return true; }
+        if(keyData==(Keys.Control|Keys.D0)) { SetCardZoom(90,true); return true; }
         if(keyData==Keys.Escape&&!String.IsNullOrEmpty(search.Text)) { search.Clear(); return true; }
         return base.ProcessCmdKey(ref msg,keyData);
     }
@@ -426,6 +473,7 @@ sealed class Overview : UserControl
     }
     public void TickOverview() {
         if(IsDisposed) return;
+        RefreshCardScale();
         if(discovery!=null && discovery.IsCompleted) {
             if(discovery.Status==TaskStatus.RanToCompletion && discovery.Result.Revision==directoryRevision) {
                 var previous=monitoredProjects.Where(h=>h.CodexPath!=null).GroupBy(h=>h.CodexPath,StringComparer.OrdinalIgnoreCase).ToDictionary(g=>g.Key,g=>g.First(),StringComparer.OrdinalIgnoreCase);
@@ -563,7 +611,7 @@ sealed class Overview : UserControl
         try { seen.Save(h.CodexPath,h.CompletionToken); viewed[h.CodexPath]=h.CompletionToken; nextPaint=DateTime.MinValue; }
         catch(Exception) { summary.Text="查看标记保存失败，下次可重新打开项目重试"; }
     }
-    protected override void Dispose(bool disposing) { if(disposing) { monitor.Dispose(); searchDelay.Dispose(); } base.Dispose(disposing); }
+    protected override void Dispose(bool disposing) { if(disposing) { monitor.Dispose(); searchDelay.Dispose(); zoomMenu.Dispose(); } base.Dispose(disposing); }
     public static void Verify(string screenshot=null) {
         VerifyWindowMembership();
         string local=AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\');
@@ -662,6 +710,31 @@ sealed class Overview : UserControl
             view.managedWindows.Names.Add(Path.GetFileName(running.ProjectPath));
             view.pinned[ProjectKey(running)]="1"; view.RenderCards();
             if(!view.cards.Entries.Single(e=>e.Project==running).Managed||!view.cards.Entries.Single(e=>e.Project==running).Opened||!view.cards.Entries.Single(e=>e.Project==running).Pinned||view.cards.Entries.Single(e=>e.Project==done).Managed) throw new Exception("Managed / external / pinned state missing");
+            string selectedBeforeZoom=view.cards.SelectedKey; int previousHeight=0;
+            foreach(int percent in new[]{60,90,100,150}) {
+                view.SetCardZoom(percent,false); Application.DoEvents();
+                var bounds=view.cards.BoundsFor(0);
+                if(bounds.Height<=previousHeight || !view.cards.ButtonsFit() || view.cards.Hit(new Point(bounds.X+5,bounds.Y+5))!=0 || view.cards.SelectedKey!=selectedBeforeZoom) throw new Exception("Card zoom layout, hit target or selection failed");
+                previousHeight=bounds.Height;
+                if(screenshot!=null) using(var image=new Bitmap(view.Width,view.Height)) { view.DrawToBitmap(image,new Rectangle(Point.Empty,image.Size)); image.Save(Path.Combine(testDir,"zoom-"+percent+".png")); }
+            }
+            view.SetCardZoom(90,false);
+            if(testDir!=null) {
+                view.zoomOut.PerformClick(); if(view.cards.Zoom!=80) throw new Exception("Zoom out button failed");
+                view.zoomIn.PerformClick(); if(view.cards.Zoom!=90) throw new Exception("Zoom in button failed");
+                ((ToolStripMenuItem)view.zoomMenu.Items[3]).PerformClick();
+                if(view.cards.Zoom!=100 || view.viewStore.Read()["zoom:"+view.zoomMonitor]!="100") throw new Exception("Zoom menu persistence failed");
+                view.SetCardZoom(60,false); view.zoomMonitor=null; view.RefreshCardScale();
+                if(view.cards.Zoom!=100) throw new Exception("Saved monitor zoom not restored");
+                var originalLocation=form.Location; string originalMonitor=view.zoomMonitor;
+                foreach(var screen in Screen.AllScreens) {
+                    form.Location=new Point(screen.WorkingArea.X+20,screen.WorkingArea.Y+20); Application.DoEvents(); view.RefreshCardScale();
+                    view.SetCardZoom(screen.DeviceName==originalMonitor?100:75,true);
+                }
+                form.Location=originalLocation; Application.DoEvents(); view.RefreshCardScale();
+                if(view.cards.Zoom!=100) throw new Exception("Monitor zoom preferences were not independent");
+                view.SetCardZoom(90,true);
+            }
             if(screenshot!=null) using(var image=new Bitmap(view.Width,view.Height)) { view.DrawToBitmap(image,new Rectangle(Point.Empty,image.Size)); image.Save(screenshot); }
             view.ApplyTheme(true);
             Application.DoEvents();

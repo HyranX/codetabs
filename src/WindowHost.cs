@@ -1098,7 +1098,8 @@ sealed class MainForm : Form
                 // Previous restore cases can leave the fixture maximized on another screen.
                 // Restore it, place it inside the work area, then verify the actual hit target.
                 var pickArea=Screen.PrimaryScreen.WorkingArea;
-                Native.ShowWindow(handle,9); Native.SetWindowPos(handle,IntPtr.Zero,pickArea.Left+40,pickArea.Top+40,640,480,0x0040);
+                // Keep this short-lived fixture above unrelated always-on-top desktop apps.
+                Native.ShowWindow(handle,9); Native.SetWindowPos(handle,new IntPtr(-1),pickArea.Left+40,pickArea.Top+40,640,480,0x0040);
                 var pickPoint=new Point(pickArea.Left+140,pickArea.Top+140);
                 var pickWait=Stopwatch.StartNew();
                 while(HostApi.GetAncestor(HostApi.WindowFromPoint(pickPoint),2)!=handle && pickWait.ElapsedMilliseconds<2000) { Application.DoEvents(); System.Threading.Thread.Sleep(10); }

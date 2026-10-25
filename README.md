@@ -6,11 +6,11 @@
 
 Windows 桌面窗口标签管理器，附带本地 Codex 会话总览。适合同时打开多个 VS Code 项目时集中切换窗口、查看任务状态。
 
-当前版本：**0.17.0**。Windows 10/11 x64，.NET Framework 4.8。便携运行，无需 Node.js 或 Python；程序暂未签名。
+当前版本：**0.17.1**。Windows 10/11 x64，.NET Framework 4.8。便携运行，无需 Node.js 或 Python；程序暂未签名。
 
 ## 下载与启动
 
-在 [GitHub Releases](https://github.com/HyranX/codetabs/releases) 的 **Assets** 中下载 `CodeTabs-0.17.0-windows-x64-portable.zip` 及同名 `.sha256` 文件。GitHub 自动提供的 Source code ZIP 是源码，不包含编译后的程序。
+在 [GitHub Releases](https://github.com/HyranX/codetabs/releases) 的 **Assets** 中下载 `CodeTabs-0.17.1-windows-x64-portable.zip` 及同名 `.sha256` 文件。GitHub 自动提供的 Source code ZIP 是源码，不包含编译后的程序。
 
 1. 将便携包解压到固定、可写的目录。
 2. 双击 `CodeTabs.exe`。
@@ -47,6 +47,8 @@ Windows 桌面窗口标签管理器，附带本地 Codex 会话总览。适合�
 0.16.7 修正右键菜单失效/闪烁，以及移动容器后内容被遮挡、跟随迟缓的问题。位置同步使用移动事件，窗口抬升不会主动切换输入焦点。
 
 ## Codex 总览
+
+项目卡片采用更紧凑的间距和有限宽度，避免填满整列后过大。工具栏的 `− / 百分比 / ＋` 可将卡片缩放到 60%–150%，默认 90%；点击百分比可直接选择档位。支持 Ctrl+加号/减号，Ctrl+0 恢复默认。缩放分别按显示器保存，换屏后自动恢复该屏设置；只调整总览卡片，不改变已接入应用的缩放。
 
 读取当前用户可访问的本地 Codex 会话与索引。默认从用户目录的 `.codex/` 读取，也支持 `CODEX_HOME`。不改写 Codex 会话，不保存提示词正文；本地配置会保存项目路径、会话关联和自定义标题，因此不应随源码或发布包上传。
 
