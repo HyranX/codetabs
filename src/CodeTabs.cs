@@ -99,6 +99,7 @@ static class Program
         bool smoke=args.Length>0 && args[0]=="--smoke-test";
         if(smoke) Console.Error.WriteLine("check: initializing");
         Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
+        if(args.Length>0 && args[0]=="--conversation-navigation-test") { try { ConversationNavigation.Verify(); } catch(Exception ex) { Console.Error.WriteLine(ex); Environment.Exit(1); } return; }
         if(args.Length>0 && args[0]=="--migrate-config") { try { PortableConfig.Initialize(); } catch(Exception ex) { Console.Error.WriteLine(ex); Environment.Exit(1); } return; }
         if(args.Length==2 && args[0]=="--overview-test") { Overview.Verify(args[1]); return; }
         if(args.Length==2 && args[0]=="--binding-test") { BindingStore.VerifyDisk(args[1]); return; }

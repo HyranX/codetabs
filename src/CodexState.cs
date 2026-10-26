@@ -54,6 +54,11 @@ sealed class CodexState : IDisposable
     public static string ProjectDirectory(string path) {
         using(var stream=new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.ReadWrite|FileShare.Delete)) using(var reader=new StreamReader(stream,Encoding.UTF8)) return Text(Child(Parse(reader.ReadLine()),"payload"),"cwd");
     }
+    public static string ConversationId(string path) {
+        using(var stream=new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.ReadWrite|FileShare.Delete)) using(var reader=new StreamReader(stream,Encoding.UTF8)) {
+            var meta=Parse(reader.ReadLine()); return Text(meta,"type")=="session_meta"?Text(Child(meta,"payload"),"id"):null;
+        }
+    }
     static Dictionary<string,object> Child(Dictionary<string,object> obj,string key) { object value; return obj!=null&&obj.TryGetValue(key,out value)?value as Dictionary<string,object>:null; }
     static string Text(Dictionary<string,object> obj,string key) { object value; return obj!=null&&obj.TryGetValue(key,out value)?value as string:null; }
     static bool IsSubagentSource(Dictionary<string,object> payload) {

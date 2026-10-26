@@ -713,7 +713,7 @@ sealed class MainForm : Form
         Fit(); UpdateCompatible(false); UpdateCaption(); RefreshBindings(); RecoverFocus(); codex.Refresh(hosted); overview.TickOverview(); strip.Invalidate();
         if(movingWindow!=IntPtr.Zero) { Point pointer; HostApi.GetCursorPos(out pointer); strip.ExternalDragOver=DropZone(pointer); }
         if(beforeLaunch!=null) {
-            foreach(var h in Discover()) if(!beforeLaunch.Contains(h.Handle) && (pendingOverview==null||MatchesProject(h,pendingOverview))) { beforeLaunch=null; Attach(h); if(pendingOverview!=null) { if(!String.IsNullOrEmpty(pendingOverview.CodexPath)&&SaveBinding(h,pendingOverview.CodexPath)) overview.MarkViewed(pendingOverview); pendingOverview=null; } break; }
+            foreach(var h in Discover()) if(!beforeLaunch.Contains(h.Handle) && (pendingOverview==null||MatchesProject(h,pendingOverview))) { beforeLaunch=null; Attach(h); if(pendingOverview!=null) { if(!String.IsNullOrEmpty(pendingOverview.CodexPath)&&SaveBinding(h,pendingOverview.CodexPath)) overview.MarkViewed(pendingOverview); OpenCodexConversation(pendingOverview,h); pendingOverview=null; } break; }
             if(beforeLaunch!=null && DateTime.UtcNow>launchDeadline) { beforeLaunch=null; pendingOverview=null; Error("新窗口尚未就绪，可稍后点击“全部接入 VS Code”。"); }
         }
     }
@@ -772,13 +772,34 @@ sealed class MainForm : Form
     void OpenOverviewProject(Hosted project) {
         bool moved=project.OriginalProjectPath!=null&&!String.Equals(project.OriginalProjectPath,project.ProjectPath,StringComparison.OrdinalIgnoreCase);
         var existing=hosted.Find(h=>h.IsVSCode&&!String.IsNullOrEmpty(project.CodexPath)&&(!moved||MatchesProject(h,project))&&String.Equals(h.CodexPath,project.CodexPath,StringComparison.OrdinalIgnoreCase))??hosted.Find(h=>MatchesProject(h,project));
-        if(existing!=null) { if(!String.IsNullOrEmpty(project.CodexPath)&&existing.CodexPath!=project.CodexPath && !SaveBinding(existing,project.CodexPath)) return; Select(existing); overview.MarkViewed(project); return; }
+        if(existing!=null) { if(!String.IsNullOrEmpty(project.CodexPath)&&existing.CodexPath!=project.CodexPath && !SaveBinding(existing,project.CodexPath)) return; Select(existing); overview.MarkViewed(project); OpenCodexConversation(project,existing); return; }
         var windows=Discover().FindAll(h=>MatchesProject(h,project));
-        if(windows.Count==1) { Attach(windows[0]); if(!String.IsNullOrEmpty(project.CodexPath)&&SaveBinding(windows[0],project.CodexPath)) overview.MarkViewed(project); return; }
+        if(windows.Count==1) { Attach(windows[0]); if(!String.IsNullOrEmpty(project.CodexPath)&&SaveBinding(windows[0],project.CodexPath)) overview.MarkViewed(project); OpenCodexConversation(project,windows[0]); return; }
         if(windows.Count>1) { Error("有多个同名 VS Code 窗口，请从窗口列表选择接入后再打开项目。"); return; }
         if(beforeLaunch!=null) { Error("正在等待另一个 VS Code 窗口打开，请稍后重试。"); return; }
         if(String.IsNullOrWhiteSpace(project.ProjectPath)||(!Overview.IsRemote(project)&&!Directory.Exists(project.ProjectPath))) { Error("无法读取项目目录，请使用卡片菜单更改目录后打开。"); return; }
         pendingOverview=project; NewWindow(); if(beforeLaunch==null) pendingOverview=null;
+    }
+    int conversationRequest;
+    async void OpenCodexConversation(Hosted project,Hosted window) {
+        int request=++conversationRequest;
+        if(!hosted.Contains(window)) return;
+        try {
+            string id=ConversationNavigation.ThreadId(project); if(id==null) return;
+            string title=Native.Title(window.Handle),executable;
+            uint pid; Native.GetWindowThreadProcessId(window.Handle,out pid);
+            using(var process=Process.GetProcessById((int)pid)) executable=process.MainModule.FileName;
+            string status=await System.Threading.Tasks.Task.Run(()=>ConversationNavigation.RunCli(executable,"--status"));
+            if(IsDisposed||closing||request!=conversationRequest||strip.Selected!=window||!hosted.Contains(window)||!Native.IsWindow(window.Handle)) return;
+            if(Native.Title(window.Handle)!=title) throw new InvalidOperationException("项目窗口标题正在变化，请再次点击卡片重试。");
+            ConversationNavigation.VerifyInstance(status,pid);
+            int target=ConversationNavigation.WindowId(status,title);
+            string uri=ConversationNavigation.UriFor(id,target,Path.GetFileNameWithoutExtension(executable).IndexOf("insiders",StringComparison.OrdinalIgnoreCase)>=0);
+            await System.Threading.Tasks.Task.Run(()=>ConversationNavigation.RunCli(executable,"--open-url",uri));
+        } catch(Exception ex) {
+            if(!IsDisposed&&!closing&&request==conversationRequest&&strip.Selected==window)
+                Error("项目窗口已打开，但未能自动切换 Codex 对话：\n"+ex.Message+"\n请确认该窗口已安装并登录 Codex 扩展，也可从扩展历史记录手动打开。");
+        }
     }
     void UpdateCompatible(bool raise) { UpdateCompatible(raise,HostApi.GetForegroundWindow()); }
     void UpdateCompatible(bool raise,IntPtr foreground) {

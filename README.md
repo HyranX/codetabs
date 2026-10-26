@@ -6,11 +6,11 @@
 
 Windows 桌面窗口标签管理器，附带本地 Codex 会话总览。适合同时打开多个 VS Code 项目时集中切换窗口、查看任务状态。
 
-当前版本：**0.17.1**。Windows 10/11 x64，.NET Framework 4.8。便携运行，无需 Node.js 或 Python；程序暂未签名。
+当前版本：**0.17.2**。Windows 10/11 x64，.NET Framework 4.8。便携运行，无需 Node.js 或 Python；程序暂未签名。
 
 ## 下载与启动
 
-在 [GitHub Releases](https://github.com/HyranX/codetabs/releases) 的 **Assets** 中下载 `CodeTabs-0.17.1-windows-x64-portable.zip` 及同名 `.sha256` 文件。GitHub 自动提供的 Source code ZIP 是源码，不包含编译后的程序。
+在 [GitHub Releases](https://github.com/HyranX/codetabs/releases) 的 **Assets** 中下载 `CodeTabs-0.17.2-windows-x64-portable.zip` 及同名 `.sha256` 文件。GitHub 自动提供的 Source code ZIP 是源码，不包含编译后的程序。
 
 1. 将便携包解压到固定、可写的目录。
 2. 双击 `CodeTabs.exe`。
@@ -52,7 +52,7 @@ Windows 桌面窗口标签管理器，附带本地 Codex 会话总览。适合�
 
 读取当前用户可访问的本地 Codex 会话与索引。默认从用户目录的 `.codex/` 读取，也支持 `CODEX_HOME`。不改写 Codex 会话，不保存提示词正文；本地配置会保存项目路径、会话关联和自定义标题，因此不应随源码或发布包上传。
 
-双击卡片或点击打开按钮，优先切换已接入窗口，再寻找已打开的项目窗口，否则启动 VS Code。此操作不会自动执行 Codex 任务，也不保证选中 VS Code 内某条对话。远程项目需要现有 SSH 配置与 Remote-SSH 扩展。
+双击卡片或点击打开按钮，优先切换已接入窗口，再寻找已打开的项目窗口，否则启动 VS Code。有有效对话 ID 或本地会话日志时，会请求该项目窗口中的 Codex 扩展打开对应历史对话；不会发送消息或自动开始任务。已在 Codex 扩展 26.1021.22027 上验证，首次打开链接时 VS Code 可能要求确认；扩展需已安装并登录。仅目录卡片没有可识别对话时只打开项目。同名窗口或独立用户数据目录无法安全定位时会提示，不猜测跳转目标。远程项目需要现有 SSH 配置与 Remote-SSH 扩展，远程对话跳转尚未实际验证。
 
 完成状态来自本地日志，不代表任务质量验收。“已在 CodeTabs 中打开”仅记录打开动作。没有本地日志的云端/远程会话可能只有索引信息；后台 subagent 会话不作为用户任务发送完成提醒。
 
