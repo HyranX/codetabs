@@ -51,6 +51,46 @@ sealed class ShortcutBox : TextBox
     }
 }
 
+sealed class DropTargetOverlay : Form
+{
+    bool ready;
+    int dpi;
+    Font titleFont,detailFont;
+    public DropTargetOverlay() {
+        FormBorderStyle=FormBorderStyle.None; ShowInTaskbar=false;
+        StartPosition=FormStartPosition.Manual; AutoScaleMode=AutoScaleMode.None; Opacity=0.92;
+        SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer,true);
+    }
+    protected override bool ShowWithoutActivation { get { return true; } }
+    protected override CreateParams CreateParams { get { var p=base.CreateParams; p.ExStyle|=0x08000000|0x00000080|0x00000020|0x00080000; return p; } }
+    protected override void WndProc(ref Message message) {
+        if(message.Msg==0x0084) { message.Result=new IntPtr(-1); return; }
+        if(message.Msg==0x0021) { message.Result=new IntPtr(3); return; }
+        base.WndProc(ref message);
+    }
+    public void Present(Rectangle bounds,bool inside,int targetDpi) {
+        if(dpi!=targetDpi) {
+            dpi=targetDpi; if(titleFont!=null) titleFont.Dispose(); if(detailFont!=null) detailFont.Dispose();
+            titleFont=new Font("Microsoft YaHei UI",16*dpi/96f,FontStyle.Bold,GraphicsUnit.Pixel);
+            detailFont=new Font("Microsoft YaHei UI",12*dpi/96f,FontStyle.Regular,GraphicsUnit.Pixel);
+        }
+        ready=inside; Bounds=bounds; if(!Visible) Show();
+        // Topmost and no-activate: the dragged application's input queue keeps the drag.
+        Native.SetWindowPos(Handle,new IntPtr(-1),bounds.X,bounds.Y,bounds.Width,bounds.Height,0x0010|0x0040);
+        Invalidate();
+    }
+    public void Dismiss() { if(IsHandleCreated) Native.SetWindowPos(Handle,new IntPtr(-2),0,0,0,0,0x0013); Hide(); }
+    protected override void OnPaint(PaintEventArgs e) {
+        e.Graphics.Clear(ready?Color.FromArgb(15,100,157):Color.FromArgb(34,47,64));
+        int pad=Math.Max(6,8*dpi/96);
+        using(var pen=new Pen(ready?Color.FromArgb(135,225,255):Color.FromArgb(109,167,210),Math.Max(2,2*dpi/96))) e.Graphics.DrawRectangle(pen,pad,pad,Math.Max(1,Width-2*pad-1),Math.Max(1,Height-2*pad-1));
+        var flags=TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter|TextFormatFlags.SingleLine|TextFormatFlags.EndEllipsis;
+        TextRenderer.DrawText(e.Graphics,ready?"松开鼠标，接入 CodeTabs":"把窗口拖到这里",titleFont??Font,new Rectangle(pad*2,pad,Width-pad*4,Height/2),Color.White,flags);
+        TextRenderer.DrawText(e.Graphics,"整个高亮区域均可接入 · Esc 取消",detailFont??Font,new Rectangle(pad*2,Height/2,Width-pad*4,Height/2-pad),Color.FromArgb(208,232,247),flags);
+    }
+    protected override void Dispose(bool disposing) { if(disposing) { if(titleFont!=null) titleFont.Dispose(); if(detailFont!=null) detailFont.Dispose(); } base.Dispose(disposing); }
+}
+
 sealed class TabStrip : Control
 {
     public readonly List<Hosted> Items;
@@ -298,6 +338,8 @@ sealed class MainForm : Form
     readonly string settings=PortableConfig.FilePath("shortcuts.txt");
     HostApi.HookProc hookProc,mouseProc; IntPtr hook,mouseHook; bool dialogOpen, layoutPending;
     HostApi.WinEventProc moveProc; IntPtr moveHook,movingWindow;
+    readonly DropTargetOverlay dropOverlay=new DropTargetOverlay();
+    readonly Timer dropTimer=new Timer { Interval=40 };
     HostApi.WinEventProc foregroundProc; IntPtr foregroundHook;
     Native.RectangleEdges moveStart;
     WindowSnapshot moveSnapshot;
@@ -378,13 +420,14 @@ sealed class MainForm : Form
         LocationChanged+=delegate { if(IsHandleCreated&&!closing) UpdateCompatible(ManagedForeground(HostApi.GetForegroundWindow())); };
         Load+=delegate { LoadSettings(); vscodeCompatible=ReadCompatibleMode(windowModeSettings); imeModeItem.Checked=vscodeCompatible; UpdateKeyboardHook(); InstallMouseHook(); InstallMoveHook(); InstallForegroundHook(); };
         timer.Tick+=delegate { Tick(); }; timer.Start();
+        dropTimer.Tick+=delegate { Point pointer; HostApi.GetCursorPos(out pointer); UpdateDropFeedback(pointer); };
         FormClosing+=delegate(object sender,FormClosingEventArgs e) {
             if(restoredForExit) return;
             e.Cancel=true;
             if(closing) return;
-            closing=true; Enabled=false; RestoreAll(); FinishRestores();
+            closing=true; CancelWindowMove(); Enabled=false; RestoreAll(); FinishRestores();
         };
-        FormClosed+=delegate { timer.Dispose(); codex.Dispose(); if(notifications!=null) notifications.Dispose(); if(moveHook!=IntPtr.Zero) HostApi.UnhookWinEvent(moveHook); if(foregroundHook!=IntPtr.Zero) HostApi.UnhookWinEvent(foregroundHook); if(hook!=IntPtr.Zero) HostApi.UnhookWindowsHookEx(hook); if(mouseHook!=IntPtr.Zero) HostApi.UnhookWindowsHookEx(mouseHook); menu.Dispose(); };
+        FormClosed+=delegate { timer.Dispose(); dropTimer.Dispose(); dropOverlay.Dispose(); codex.Dispose(); if(notifications!=null) notifications.Dispose(); if(moveHook!=IntPtr.Zero) HostApi.UnhookWinEvent(moveHook); if(foregroundHook!=IntPtr.Zero) HostApi.UnhookWinEvent(foregroundHook); if(hook!=IntPtr.Zero) HostApi.UnhookWindowsHookEx(hook); if(mouseHook!=IntPtr.Zero) HostApi.UnhookWindowsHookEx(mouseHook); menu.Dispose(); };
     }
     void Error(string message) { MessageBox.Show(this,message,"Code Tabs",MessageBoxButtons.OK,MessageBoxIcon.Information); }
     static bool IsCodeProcess(string name) { return name.Equals("Code",StringComparison.OrdinalIgnoreCase)||name.Equals("Code - Insiders",StringComparison.OrdinalIgnoreCase); }
@@ -711,7 +754,6 @@ sealed class MainForm : Form
         if(DateTime.UtcNow>=nextOpenWindowRefresh) { nextOpenWindowRefresh=DateTime.UtcNow.AddSeconds(2); overview.SetOpenWindows(hosted,Discover()); }
         foreach(var h in hosted.ToArray()) if(!Native.IsWindow(h.Handle)) { hosted.Remove(h); if(strip.Selected==h) Select(hosted.Count>0?hosted[0]:null); }
         Fit(); UpdateCompatible(false); UpdateCaption(); RefreshBindings(); RecoverFocus(); codex.Refresh(hosted); overview.TickOverview(); strip.Invalidate();
-        if(movingWindow!=IntPtr.Zero) { Point pointer; HostApi.GetCursorPos(out pointer); strip.ExternalDragOver=DropZone(pointer); }
         if(beforeLaunch!=null) {
             foreach(var h in Discover()) if(!beforeLaunch.Contains(h.Handle) && (pendingOverview==null||MatchesProject(h,pendingOverview))) { beforeLaunch=null; Attach(h); if(pendingOverview!=null) { if(!String.IsNullOrEmpty(pendingOverview.CodexPath)&&SaveBinding(h,pendingOverview.CodexPath)) overview.MarkViewed(pendingOverview); OpenCodexConversation(pendingOverview,h); pendingOverview=null; } break; }
             if(beforeLaunch!=null && DateTime.UtcNow>launchDeadline) { beforeLaunch=null; pendingOverview=null; Error("新窗口尚未就绪，可稍后点击“全部接入 VS Code”。"); }
@@ -869,22 +911,41 @@ sealed class MainForm : Form
             return true;
         } catch(Exception ex) { Error("保存关联失败："+ex.Message); return false; }
     }
-    bool DropZone(Point point) { return Visible && Enabled && !dialogOpen && WindowState!=FormWindowState.Minimized && strip.RectangleToScreen(strip.ClientRectangle).Contains(point); }
+    bool CanAcceptDrop { get { return !closing && Visible && Enabled && !dialogOpen && !menu.Visible && WindowState!=FormWindowState.Minimized; } }
+    Rectangle DropBounds() {
+        var top=strip.RectangleToScreen(strip.ClientRectangle);
+        int dpi=(int)WindowRestore.GetDpiForWindow(Handle);
+        return new Rectangle(top.X,top.Y,top.Width,Math.Min(ClientSize.Height,Math.Max(strip.Height,96*Math.Max(96,dpi)/96)));
+    }
+    bool DropZone(Point point) { return CanAcceptDrop && DropBounds().Contains(point); }
+    void HideDropFeedback() { dropOverlay.Dismiss(); if(strip.ExternalDragOver) { strip.ExternalDragOver=false; strip.Invalidate(); } }
+    void CancelWindowMove() { movingWindow=IntPtr.Zero; dropTimer.Stop(); HideDropFeedback(); }
+    void UpdateDropFeedback(Point pointer) {
+        if(movingWindow==IntPtr.Zero || !Native.IsWindow(movingWindow) || !CanAcceptDrop || HostApi.GetAsyncKeyState(27)<0) { CancelWindowMove(); return; }
+        Native.RectangleEdges now;
+        if(!HostApi.GetWindowRect(movingWindow,out now) || now.right-now.left!=moveStart.right-moveStart.left || now.bottom-now.top!=moveStart.bottom-moveStart.top || (now.left==moveStart.left&&now.top==moveStart.top)) { HideDropFeedback(); return; }
+        int dpi=Math.Max(96,(int)WindowRestore.GetDpiForWindow(Handle));
+        var bounds=DropBounds(); var nearby=Rectangle.Inflate(bounds,48*dpi/96,64*dpi/96);
+        if(!nearby.Contains(pointer)) { HideDropFeedback(); return; }
+        bool inside=bounds.Contains(pointer); strip.ExternalDragOver=inside; strip.Invalidate();
+        dropOverlay.Present(bounds,inside,dpi);
+    }
     void PickAt(Point point) {
         IntPtr target=HostApi.GetAncestor(HostApi.WindowFromPoint(point),2);
         var item=Discover(false).Find(h=>h.Handle==target);
         if(item!=null) { Attach(item); Activate(); QueueFocus(); }
     }
     void BeginWindowMove(IntPtr window) {
-        movingWindow=IntPtr.Zero;
-        if(!Visible||dialogOpen||window==Handle||hosted.Exists(h=>h.Handle==window)||Native.GetParent(window)!=IntPtr.Zero) return;
+        CancelWindowMove();
+        if(!CanAcceptDrop||window==Handle||hosted.Exists(h=>h.Handle==window)||Native.GetParent(window)!=IntPtr.Zero||!Discover(false).Any(h=>h.Handle==window)) return;
         try { moveSnapshot=WindowSnapshot.Capture(window); } catch(Exception) { return; }
         moveStart=moveSnapshot.Bounds;
         movingWindow=window;
+        dropTimer.Start();
     }
     bool FinishWindowMove(IntPtr window,Point pointer) {
         if(window!=movingWindow) return false;
-        movingWindow=IntPtr.Zero; strip.ExternalDragOver=false; strip.Invalidate();
+        CancelWindowMove();
         Native.RectangleEdges end; if(!HostApi.GetWindowRect(window,out end)) return false;
         // Only a moved window, not a resize or a cancelled drag, qualifies.
         if((end.left==moveStart.left&&end.top==moveStart.top)||end.right-end.left!=moveStart.right-moveStart.left||end.bottom-end.top!=moveStart.bottom-moveStart.top||!DropZone(pointer)) return false;
@@ -893,12 +954,50 @@ sealed class MainForm : Form
     }
     void InstallMoveHook() {
         moveProc=delegate(IntPtr hookId,uint ev,IntPtr window,int objectId,int childId,uint thread,uint time) {
-            if(IsDisposed||window==IntPtr.Zero||objectId!=0||childId!=0) return;
+            if(testing||IsDisposed||window==IntPtr.Zero||objectId!=0||childId!=0) return;
             if(ev==0x000A) BeginWindowMove(window);
             else if(ev==0x000B) { Point point; HostApi.GetCursorPos(out point); FinishWindowMove(window,point); }
         };
         moveHook=HostApi.SetWinEventHook(0x000A,0x000B,IntPtr.Zero,moveProc,0,0,2);
         if(moveHook==IntPtr.Zero) Error("标题栏拖入监听不可用，可使用“拖拽接入”按钮或窗口列表。");
+    }
+    public void VerifyDropTarget(string output) {
+        testing=true; Directory.CreateDirectory(output);
+        using(var process=Process.Start(new ProcessStartInfo(Application.ExecutablePath,"--test-window") { UseShellExecute=false })) {
+            try {
+                IntPtr window=IntPtr.Zero;
+                for(int i=0;i<100&&window==IntPtr.Zero;i++) { System.Threading.Thread.Sleep(50); process.Refresh(); window=process.MainWindowHandle; }
+                if(window==IntPtr.Zero) throw new Exception("Drop fixture failed to start");
+                foreach(var screen in Screen.AllScreens) {
+                    Location=new Point(screen.WorkingArea.X+30,screen.WorkingArea.Y+30); Application.DoEvents();
+                    Native.ShowWindow(window,9); Native.SetWindowPos(window,IntPtr.Zero,screen.WorkingArea.X+100,screen.WorkingArea.Y+180,620,420,0x0040); Application.DoEvents();
+                    BeginWindowMove(window); dropTimer.Stop();
+                    Native.SetWindowPos(window,IntPtr.Zero,screen.WorkingArea.X+110,screen.WorkingArea.Y+190,0,0,0x0015);
+                    var area=DropBounds(); var pointer=new Point(area.Left+area.Width/2,area.Bottom-12);
+                    if(strip.RectangleToScreen(strip.ClientRectangle).Contains(pointer)||!DropZone(pointer)) throw new Exception("Expanded drop target missing");
+                    IntPtr foreground=HostApi.GetForegroundWindow(); UpdateDropFeedback(pointer);
+                    if(HostApi.GetForegroundWindow()!=foreground) throw new Exception("Presenting the drop overlay changed foreground focus");
+                    Application.DoEvents();
+                    if(!dropOverlay.Visible||!strip.ExternalDragOver||dropOverlay.Bounds!=area||HostApi.GetForegroundWindow()==dropOverlay.Handle) throw new Exception("Overlay state failed: visible="+dropOverlay.Visible+" ready="+strip.ExternalDragOver+" actual="+dropOverlay.Bounds+" expected="+area+" activated="+(HostApi.GetForegroundWindow()==dropOverlay.Handle));
+                    long style=Native.GetStyle(dropOverlay.Handle,-20).ToInt64();
+                    if((style&0x080800A8)!=0x080800A8 || HostApi.GetAncestor(HostApi.WindowFromPoint(pointer),2)==dropOverlay.Handle) throw new Exception("Overlay is not topmost or intercepts the pointer");
+                    using(var bitmap=new Bitmap(dropOverlay.Width,dropOverlay.Height)) { dropOverlay.DrawToBitmap(bitmap,new Rectangle(Point.Empty,bitmap.Size)); bitmap.Save(Path.Combine(output,"drop-target-"+WindowRestore.GetDpiForWindow(Handle)+"dpi.png")); }
+                    UpdateDropFeedback(new Point(area.Left-500,area.Top-500)); if(dropOverlay.Visible||(Native.GetStyle(dropOverlay.Handle,-20).ToInt64()&8)!=0||strip.ExternalDragOver) throw new Exception("Overlay remained visible or topmost outside target vicinity");
+                    UpdateDropFeedback(pointer); CancelWindowMove(); if(dropOverlay.Visible||FinishWindowMove(window,pointer)) throw new Exception("Cancelled drag attached a window");
+                    BeginWindowMove(window); dropTimer.Stop();
+                    Native.RectangleEdges before; HostApi.GetWindowRect(window,out before);
+                    Native.SetWindowPos(window,IntPtr.Zero,0,0,before.right-before.left+20,before.bottom-before.top,0x0016);
+                    UpdateDropFeedback(pointer); if(dropOverlay.Visible||FinishWindowMove(window,pointer)) throw new Exception("Resize offered window attachment");
+                    BeginWindowMove(window); dropTimer.Stop();
+                    var snapshot=moveSnapshot;
+                    HostApi.GetWindowRect(window,out before); Native.SetWindowPos(window,IntPtr.Zero,before.left+10,before.top+10,0,0,0x0015);
+                    UpdateDropFeedback(pointer);
+                    if(!FinishWindowMove(window,pointer)||dropOverlay.Visible) throw new Exception("Expanded drop attachment failed");
+                    DetachForTest(hosted.Find(h=>h.Handle==window)); AssertRestoredPlacement(window,snapshot.Placement,"Expanded drop detach",snapshot.Bounds);
+                }
+                Console.Error.WriteLine("Expanded drop: multi-monitor target, topmost/no-activate/click-through overlay, outside/cancel/resize rejection, attachment and original placement passed");
+            } finally { CancelWindowMove(); process.CloseMainWindow(); process.WaitForExit(5000); }
+        }
     }
     static bool Valid(Keys keys) { Keys key=keys&Keys.KeyCode; return (keys&(Keys.Control|Keys.Alt))!=0 && key!=Keys.None && key!=Keys.ControlKey && key!=Keys.Menu && key!=Keys.ShiftKey && key!=Keys.LWin && key!=Keys.RWin; }
     static bool ReadCompatibleMode(string path) {
@@ -1297,12 +1396,17 @@ sealed class MainForm : Form
             // Simulate a late activation after our asynchronous placement request.
             Native.SetWindowPos(Handle,IntPtr.Zero,0,0,0,0,0x0013);
             using(var unrelated=new Form { Text="Unrelated foreground stand-in",Size=new Size(200,120) }) {
-                unrelated.Show(); Native.SetWindowPos(unrelated.Handle,IntPtr.Zero,0,0,0,0,0x0013);
+                unrelated.Show(); Application.DoEvents();
+                // Drain queued activation callbacks before establishing the test's z-order.
+                // The external fixture has its own message loop; pumping this UI here would
+                // mix active-window repairs into the passive-repair assertion.
+                Native.SetWindowPos(Handle,IntPtr.Zero,0,0,0,0,0x0013);
+                Native.SetWindowPos(unrelated.Handle,IntPtr.Zero,0,0,0,0,0x0013);
                 watch.Restart();
-                do { UpdateCompatible(false,unrelated.Handle); Application.DoEvents(); System.Threading.Thread.Sleep(10); }
+                do { UpdateCompatible(false,unrelated.Handle); System.Threading.Thread.Sleep(10); }
                 while(!WindowAbove(h.Handle,Handle)&&watch.ElapsedMilliseconds<1500);
                 if(!WindowAbove(h.Handle,Handle)) throw new Exception("Late container activation remained blank");
-                if(!WindowAbove(unrelated.Handle,h.Handle)) throw new Exception("Passive repair raised over unrelated window");
+                if(!WindowAbove(unrelated.Handle,h.Handle)) throw new Exception("Passive repair raised over unrelated window: hostedTopmost="+((Native.GetStyle(h.Handle,-20).ToInt64()&8)!=0)+" containerTopmost="+TopMost+" overlayCreated="+dropOverlay.IsHandleCreated+" overlayVisible="+dropOverlay.Visible+" foreground="+HostApi.GetForegroundWindow()+" unrelated="+unrelated.Handle+" hosted="+h.Handle);
             }
             Native.ShowWindow(h.Handle,0);
             watch.Restart();
